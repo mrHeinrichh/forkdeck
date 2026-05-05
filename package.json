@@ -1,0 +1,17 @@
+{
+  "name": "forkdeck",
+  "version": "1.0.0",
+  "description": "A visual local Git workspace for branches, commits, stash, diffs, and commit identities.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "git",
+    "github",
+    "identity",
+    "commits"
+  ],
+  "author": "",
+  "license": "MIT"
+}
