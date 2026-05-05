@@ -4,6 +4,8 @@
   "description": "A visual local Git workspace for branches, commits, stash, diffs, and commit identities.",
   "main": "server.js",
   "scripts": {
+    "dev": "node server.js",
+    "check": "node --check server.js && find server public/src -name '*.js' -print0 | xargs -0 -n 1 node --check",
     "start": "node server.js"
   },
   "keywords": [
