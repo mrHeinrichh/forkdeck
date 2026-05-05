@@ -1,6 +1,6 @@
 # ForkDeck
 
-ForkDeck is a local visual Git workspace for switching commit identities, opening repositories, inspecting history, resolving conflicts, and managing stash entries from a GitKraken-style interface.
+ForkDeck is a local visual Git workspace for switching commit identities, opening repositories, inspecting history, resolving conflicts, and managing stash entries from its own graph-first interface.
 
 ## Run Locally
 
@@ -29,4 +29,3 @@ This repository uses a simple feature-branch flow:
 3. Commit one focused change at a time.
 4. Merge back to `main` with `--no-ff` so the Git graph keeps the branch shape.
 5. Push `main` and feature branches so the remote history shows the strategy.
-
