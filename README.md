@@ -10,6 +10,10 @@ npm start
 
 Open `http://localhost:4173`.
 
+## License
+
+ForkDeck is open source under the MIT License.
+
 ## Project Shape
 
 - `server/` contains the local Node server, API routes, Git commands, storage helpers, and response utilities.
