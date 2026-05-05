@@ -1,45 +1,17 @@
-const state = {
-  profiles: [],
-  repos: [],
-  selectedId: "",
-  activeIdentity: "",
-  repoPath: localStorage.getItem("repoPath") || "",
-  repo: null,
-  selectedFile: "",
-  selectedCommit: "",
-  selectedCommitFiles: [],
-  selectedCommitFile: "",
-  browserPath: localStorage.getItem("browserPath") || "/Users/heinric",
-  browserTarget: "local",
-  inspectorOpen: false,
-  centerMode: "graph",
-  repoPollTimer: null,
-  repoRefreshInFlight: false,
-  repoActionInFlight: false,
-  lastRepoSignature: "",
-  selectedCommitPatch: "",
-  selectedCommitPatchHash: "",
-  actionDialogResolve: null,
-  actionDialogAutoClose: null
-};
+import { state, store } from "./core/store.js";
+import { request } from "./services/api.js";
+import { graphColors, GRAPH_LANE_WIDTH, GRAPH_ROW_HEIGHT, STASH_NODE_ANCHOR_Y, REPO_LIVE_SYNC_MS } from "./git/constants.js";
+import { $, iconRefresh } from "./ui/dom.js";
+import { createActionDialog } from "./ui/actionDialog.js";
+import { escapeHtml, identityText, initials, colorFromText, statusClass, highlightDiff, conflictPane } from "./utils/format.js";
 
-const $ = (selector) => document.querySelector(selector);
 const accountMenuProfiles = $("#accountMenuProfiles");
 const repoList = $("#repoList");
 const repoTabs = $("#repoTabs");
 const form = $("#profileForm");
 const toast = $("#toast");
 const commitContextMenu = $("#commitContextMenu");
-const graphColors = ["#00c2ff", "#f97316", "#22c55e", "#a855f7", "#f43f5e", "#eab308", "#14b8a6", "#60a5fa"];
-const GRAPH_LANE_WIDTH = 36;
-const GRAPH_ROW_HEIGHT = 52;
-const STASH_NODE_ANCHOR_Y = 14;
-const REPO_LIVE_SYNC_MS = 3200;
 let contextMenuScrollGuardUntil = 0;
-
-function iconRefresh() {
-  if (window.lucide) window.lucide.createIcons();
-}
 
 function showToast(message, tone = "") {
   toast.textContent = message;
@@ -51,15 +23,14 @@ function showToast(message, tone = "") {
   }, 2800);
 }
 
-async function request(url, options = {}) {
-  const response = await fetch(url, {
-    headers: { "content-type": "application/json" },
-    ...options
-  });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error || "Request failed.");
-  return payload;
-}
+const {
+  closeActionDialog,
+  confirmAction,
+  promptAction,
+  confirmActionDialog,
+  cancelActionDialog,
+  runActionDialog
+} = createActionDialog({ state, $, iconRefresh, escapeHtml, showToast });
 
 function setLiveSyncStatus(message = "Live local sync", mode = "idle") {
   const status = $("#liveSyncStatus");
@@ -110,9 +81,7 @@ function applyRepoSnapshot(repo, { source = "manual", preserveGraph = true } = {
   const previousHead = previous?.commits?.[0]?.hash || "";
   const nextHead = repo?.commits?.[0]?.hash || "";
 
-  state.repo = repo;
-  state.repoPath = repo.root;
-  state.lastRepoSignature = nextSignature;
+  store.patch({ repo, repoPath: repo.root, lastRepoSignature: nextSignature });
 
   if (previousSignature && previousSignature === nextSignature) {
     setLiveSyncStatus("Live local sync", "idle");
@@ -154,166 +123,8 @@ function startRepoLiveSync() {
   }, REPO_LIVE_SYNC_MS);
 }
 
-function setActionDialog(options = {}) {
-  const mode = options.mode || "confirm";
-  const dialog = $("#actionDialog");
-  const panel = $("#actionDialogPanel");
-  const icon = $("#actionDialogIcon");
-  const output = $("#actionDialogOutput");
-  const inputWrap = $("#actionDialogInputWrap");
-  const input = $("#actionDialogInput");
-  const cancel = $("#actionDialogCancel");
-  const confirm = $("#actionDialogConfirm");
-
-  clearTimeout(state.actionDialogAutoClose);
-  dialog.dataset.mode = mode;
-  dialog.dataset.input = options.input ? "true" : "false";
-  dialog.hidden = false;
-  panel.classList.toggle("is-success", mode === "success");
-  icon.className = `action-dialog-icon is-${mode}`;
-  icon.innerHTML = mode === "running"
-    ? `<i data-lucide="${escapeHtml(options.icon || "refresh-cw")}"></i>`
-    : `<i data-lucide="${escapeHtml(options.icon || (mode === "success" ? "check" : mode === "error" ? "alert-triangle" : "git-pull-request"))}"></i>`;
-  $("#actionDialogEyebrow").textContent = options.eyebrow || "Git Action";
-  $("#actionDialogTitle").textContent = options.title || "Confirm action";
-  $("#actionDialogMessage").textContent = options.message || "Review this Git action before it runs.";
-  inputWrap.hidden = !options.input;
-  if (options.input) {
-    $("#actionDialogInputLabel").textContent = options.inputLabel || "Name";
-    input.value = options.inputValue || "";
-    input.placeholder = options.inputPlaceholder || "";
-    setTimeout(() => {
-      input.focus();
-      input.select();
-    }, 0);
-  }
-  output.hidden = !options.output;
-  output.textContent = options.output || "";
-  cancel.hidden = mode !== "confirm";
-  confirm.disabled = mode === "running";
-  confirm.textContent = mode === "confirm" ? (options.confirmLabel || "Run") : mode === "running" ? "Running..." : "Close";
-  confirm.classList.toggle("is-danger-action", Boolean(options.danger));
-  confirm.classList.toggle("accent", !options.danger);
-  iconRefresh();
-}
-
-function closeActionDialog(result = false) {
-  clearTimeout(state.actionDialogAutoClose);
-  $("#actionDialog").hidden = true;
-  const resolver = state.actionDialogResolve;
-  state.actionDialogResolve = null;
-  if (resolver) resolver(result);
-}
-
-function confirmAction(options) {
-  return new Promise((resolve) => {
-    if (state.actionDialogResolve) state.actionDialogResolve(false);
-    state.actionDialogResolve = resolve;
-    setActionDialog({ mode: "confirm", ...options });
-  });
-}
-
-function promptAction(options) {
-  return new Promise((resolve) => {
-    if (state.actionDialogResolve) state.actionDialogResolve(null);
-    state.actionDialogResolve = resolve;
-    setActionDialog({ mode: "confirm", input: true, ...options });
-  });
-}
-
-function confirmActionDialog() {
-  const dialog = $("#actionDialog");
-  const mode = dialog.dataset.mode || "";
-  if (mode === "running") return;
-  if (mode !== "confirm") return closeActionDialog(true);
-  if (dialog.dataset.input === "true") {
-    const value = $("#actionDialogInput").value.trim();
-    if (!value) return showToast("Enter a value first.");
-    return closeActionDialog(value);
-  }
-  closeActionDialog(true);
-}
-
-function cancelActionDialog() {
-  if (($("#actionDialog").dataset.mode || "") === "running") return;
-  closeActionDialog(false);
-}
-
-async function runActionDialog(options) {
-  state.repoActionInFlight = true;
-  setActionDialog({
-    mode: "running",
-    eyebrow: options.eyebrow || "Git Action",
-    title: options.runningTitle || options.title || "Running Git action",
-    message: options.runningMessage || "Working in your local repository...",
-    icon: options.icon || "refresh-cw"
-  });
-
-  try {
-    const result = await options.task();
-    const output = String(result?.output || "").trim();
-    setActionDialog({
-      mode: "success",
-      eyebrow: options.eyebrow || "Git Action",
-      title: options.successTitle || "Action complete",
-      message: options.successMessage || "Your local repository is up to date in the app.",
-      icon: "check",
-      output: output || options.successOutput || ""
-    });
-    showToast(options.successToast || options.successMessage || "Action complete.", "success");
-    state.actionDialogAutoClose = setTimeout(() => closeActionDialog(true), 1700);
-    return result;
-  } catch (error) {
-    setActionDialog({
-      mode: "error",
-      eyebrow: options.eyebrow || "Git Action",
-      title: options.errorTitle || "Action failed",
-      message: error.message,
-      icon: "alert-triangle",
-      output: error.message
-    });
-    showToast(error.message);
-    return null;
-  } finally {
-    state.repoActionInFlight = false;
-  }
-}
-
-function escapeHtml(value) {
-  return String(value || "").replace(/[&<>"']/g, (char) => {
-    const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
-    return map[char];
-  });
-}
-
-function identityText(identity) {
-  if (!identity?.name && !identity?.email) return "Not set";
-  if (!identity.email) return identity.name;
-  if (!identity.name) return identity.email;
-  return `${identity.name} <${identity.email}>`;
-}
-
 function selectedProfile() {
   return state.profiles.find((profile) => profile.id === state.selectedId);
-}
-
-function initials(profile) {
-  return (profile.label || profile.name || "?")
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
-}
-
-function colorFromText(value) {
-  const palette = ["#18c7b8", "#f28a38", "#66c56f", "#a777e3", "#ff6b64", "#f4c84a", "#60a5fa"];
-  const text = String(value || "");
-  let hash = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
-  }
-  return palette[hash % palette.length];
 }
 
 function authorColor(author) {
@@ -365,64 +176,9 @@ function commitAvatar(commit) {
   };
 }
 
-function statusClass(value) {
-  const label = String(value || "changed").toLowerCase();
-  if (label.includes("delete") || label === "d") return "status-deleted";
-  if (label.includes("add") || label === "a" || label.includes("untracked")) return "status-added";
-  if (label.includes("rename") || label === "r") return "status-renamed";
-  if (label.includes("conflict") || label === "u") return "status-conflict";
-  if (label.includes("modif") || label === "m") return "status-modified";
-  return "status-changed";
-}
-
-function highlightDiff(text) {
-  const value = String(text || "");
-  if (!value) return "";
-  return value
-    .split("\n")
-    .map((line) => {
-      let className = "diff-line";
-      if (line.startsWith("@@")) className += " diff-hunk";
-      else if (line.startsWith("diff --git") || line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ ")) className += " diff-file";
-      else if (line.startsWith("+") && !line.startsWith("+++")) className += " diff-add";
-      else if (line.startsWith("-") && !line.startsWith("---")) className += " diff-del";
-      return `<span class="${className}">${line ? escapeHtml(line) : " "}</span>`;
-    })
-    .join("");
-}
-
 function setDiff(selector, text) {
   const target = $(selector);
   if (target) target.innerHTML = highlightDiff(text);
-}
-
-function highlightConflictText(text) {
-  let section = "";
-  return String(text || "")
-    .split("\n")
-    .map((line) => {
-      if (line.startsWith("<<<<<<<")) section = "ours";
-      else if (line.startsWith("=======")) section = "divider";
-      else if (line.startsWith(">>>>>>>")) section = "theirs";
-      const marker = line.startsWith("<<<<<<<") || line.startsWith("=======") || line.startsWith(">>>>>>>");
-      const className = marker ? "conflict-marker" : section === "ours" ? "conflict-ours-line" : section === "theirs" ? "conflict-theirs-line" : "conflict-line";
-      if (line.startsWith("=======")) section = "theirs";
-      if (line.startsWith(">>>>>>>")) section = "";
-      return `<span class="${className}">${line ? escapeHtml(line) : " "}</span>`;
-    })
-    .join("");
-}
-
-function conflictPane(title, subtitle, text, tone) {
-  return `
-    <section class="conflict-pane ${tone}">
-      <header>
-        <strong>${escapeHtml(title)}</strong>
-        <span>${escapeHtml(subtitle)}</span>
-      </header>
-      <div class="conflict-code">${highlightConflictText(text || "No content available for this side.")}</div>
-    </section>
-  `;
 }
 
 function renderConflictResolver(payload) {
