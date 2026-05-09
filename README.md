@@ -10,6 +10,17 @@ npm start
 
 Open `http://localhost:4173`.
 
+## macOS Desktop Launcher
+
+Create a clickable `ForkDeck.app` on your Desktop:
+
+```sh
+chmod +x scripts/install-macos-app.sh
+./scripts/install-macos-app.sh
+```
+
+After that, double-click `ForkDeck.app` to start the local server and open ForkDeck in your browser.
+
 ## License
 
 ForkDeck is open source under the MIT License.
