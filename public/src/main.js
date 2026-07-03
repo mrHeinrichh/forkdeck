@@ -247,6 +247,49 @@ function commitRemoteUrl(commit) {
   return `https://github.com/${match[1]}/${match[2]}/commit/${commit.hash}`;
 }
 
+function remoteGitHubOwner(remote = state.repo?.remote) {
+  const value = String(remote || "").trim();
+  const httpsMatch = value.match(/^https:\/\/github\.com\/([^/]+)\/.+?(?:\.git)?$/i);
+  const sshMatch = value.match(/^git@github\.com:([^/]+)\/.+?(?:\.git)?$/i);
+  return (httpsMatch || sshMatch)?.[1] || "";
+}
+
+function preferredGitHubUser() {
+  return String(selectedProfile()?.github || remoteGitHubOwner() || "").trim().replace(/^@/, "");
+}
+
+function formatGitHubAuthStatus(payload, targetUser) {
+  const activeUser = payload.gh?.activeUser || "Not active";
+  const accounts = payload.gh?.accounts?.length
+    ? payload.gh.accounts.map((account) => `${account.active ? "*" : "-"} ${account.user} (${account.gitProtocol || "unknown protocol"})`).join("\n")
+    : "No GitHub CLI accounts found";
+  const credentialUser = payload.credential?.username || "Not available";
+  const credentialToken = payload.credential?.hasPassword ? "available" : "not returned";
+  const githubHelper = payload.helpers?.github?.join(", ") || "Not configured";
+  const globalHelper = payload.helpers?.global?.join(", ") || "None";
+  const repoOwner = payload.repo?.github?.owner || remoteGitHubOwner();
+  const remote = payload.repo?.remote || state.repo?.remote || "No remote";
+  const target = targetUser || "Choose a user";
+  const activeMatch = activeUser.toLowerCase() === String(targetUser || "").toLowerCase();
+  const credentialMatch = credentialUser.toLowerCase() === String(targetUser || "").toLowerCase();
+
+  return [
+    `Target GitHub user: ${target}`,
+    `Repository owner: ${repoOwner || "Unknown"}`,
+    `Remote: ${remote}`,
+    "",
+    `GitHub CLI active: ${activeUser}${targetUser ? activeMatch ? " (matches)" : " (mismatch)" : ""}`,
+    `Git HTTPS credential: ${credentialUser}${targetUser && credentialUser !== "Not available" ? credentialMatch ? " (matches)" : " (mismatch)" : ""}`,
+    `Credential token/password: ${credentialToken}`,
+    "",
+    "Logged-in GitHub CLI accounts:",
+    accounts,
+    "",
+    `GitHub helper: ${githubHelper}`,
+    `Global helper: ${globalHelper}`
+  ].join("\n");
+}
+
 function contextMenuItems(commit) {
   const branchRef = commitBranchRef(commit);
   return [
@@ -1561,6 +1604,49 @@ async function runRepoAction(action) {
   applyRepoSnapshot(payload.repo, { source: "action" });
 }
 
+async function fixGitHubAuth() {
+  if (!state.repoPath) return showToast("Open a repository first.");
+
+  let targetUser = preferredGitHubUser();
+  if (!targetUser) {
+    targetUser = await promptAction({
+      eyebrow: "GitHub Auth",
+      title: "GitHub username",
+      message: "Enter the GitHub account that should be used for push, pull, and fetch.",
+      icon: "key-round",
+      confirmLabel: "Continue",
+      inputLabel: "GitHub username",
+      inputPlaceholder: "mrHeinrichh"
+    });
+  }
+  if (!targetUser) return;
+
+  const status = await request(`/api/auth/github?path=${encodeURIComponent(state.repoPath)}`);
+  const confirmed = await confirmAction({
+    eyebrow: "GitHub Auth",
+    title: `Fix push auth for @${targetUser}?`,
+    message: "This switches the active GitHub CLI account and configures Git to use GitHub CLI for HTTPS credentials.",
+    icon: "key-round",
+    confirmLabel: "Fix Auth",
+    output: formatGitHubAuthStatus(status, targetUser)
+  });
+  if (!confirmed) return;
+
+  await runActionDialog({
+    eyebrow: "GitHub Auth",
+    icon: "key-round",
+    runningTitle: "Fixing GitHub auth...",
+    runningMessage: `Switching GitHub CLI and Git HTTPS credentials to @${targetUser}.`,
+    successTitle: "GitHub auth fixed",
+    successMessage: "Try Push again. Git should now use the selected GitHub account for HTTPS auth.",
+    successToast: "GitHub auth fixed.",
+    task: () => request("/api/auth/github/fix", {
+      method: "POST",
+      body: JSON.stringify({ path: state.repoPath, user: targetUser })
+    })
+  });
+}
+
 function bindEvents() {
   document.addEventListener("error", (event) => {
     const image = event.target?.closest?.(".graph-node img");
@@ -1661,6 +1747,7 @@ function bindEvents() {
   $("#fetchButton").addEventListener("click", () => runRepoAction("fetch").catch((error) => showToast(error.message)));
   $("#pullButton").addEventListener("click", () => runRepoAction("pull").catch((error) => showToast(error.message)));
   $("#pushButton").addEventListener("click", () => runRepoAction("push").catch((error) => showToast(error.message)));
+  $("#authFixButton").addEventListener("click", () => fixGitHubAuth().catch((error) => showToast(error.message)));
   $("#undoButton").addEventListener("click", () => showToast("Undo history is ready visually; Git reset is intentionally manual for now."));
   $("#redoButton").addEventListener("click", () => showToast("Redo history is ready visually; no destructive Git action ran."));
   $("#stashQuickButton").addEventListener("click", () => quickStash().catch((error) => showToast(error.message)));

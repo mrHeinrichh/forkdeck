@@ -393,6 +393,18 @@ h2 {
   color: #fff;
 }
 
+.auth-fix-button {
+  border-color: rgba(244, 200, 74, 0.42);
+  background: rgba(244, 200, 74, 0.1);
+  color: #ffe3a1;
+}
+
+.auth-fix-button:hover {
+  border-color: rgba(244, 200, 74, 0.68);
+  background: rgba(244, 200, 74, 0.17);
+  color: #fff4cb;
+}
+
 .icon-button,
 .quick-activate,
 .danger {

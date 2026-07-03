@@ -21,6 +21,19 @@ chmod +x scripts/install-macos-app.sh
 
 After that, double-click `ForkDeck.app` to start the local server and open ForkDeck in your browser.
 
+## GitHub Auth Repair
+
+If a push fails with a message like `Permission denied to another-account`, use the `Fix Auth` button beside Push.
+
+ForkDeck checks the active GitHub CLI account, the Git HTTPS credential user, and the GitHub credential helper. The repair action runs:
+
+```sh
+gh auth switch --hostname github.com --user <github-user>
+gh auth setup-git --hostname github.com
+```
+
+This fixes push authentication. Commit identity switching still uses Git's `user.name` and `user.email`.
+
 ## License
 
 ForkDeck is open source under the MIT License.

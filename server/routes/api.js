@@ -2,6 +2,7 @@ const { send, readBody } = require("../http");
 const { git } = require("../git");
 const { ensureProfiles } = require("../storage");
 const { appStatus } = require("../services/repoService");
+const { readGitHubAuth, fixGitHubAuth } = require("../services/githubAuthService");
 const { handleProfiles } = require("./profiles");
 const { handleRepo } = require("./repo");
 
@@ -14,6 +15,15 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/status") {
     return send(res, 200, await appStatus());
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/auth/github") {
+    return send(res, 200, await readGitHubAuth({ path: url.searchParams.get("path") || "" }));
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/auth/github/fix") {
+    const body = await readBody(req);
+    return send(res, 200, await fixGitHubAuth({ path: body.path || "", user: body.user || "" }));
   }
 
   if (req.method === "POST" && url.pathname === "/api/switch") {
