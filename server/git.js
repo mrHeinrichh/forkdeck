@@ -6,12 +6,14 @@ const { resolveCommand, commandOptions, commandError } = require("./commands");
 
 const execFileAsync = promisify(execFile);
 
-async function git(args, cwd = ROOT, allowFailure = false, { preserveOutput = false } = {}) {
+async function git(args, cwd = ROOT, allowFailure = false, { preserveOutput = false, env } = {}) {
   try {
     // Scope literal matching to commands receiving paths. Stash internally uses
     // magic pathspecs; setting this globally prevents it from cleaning untracked files.
     const literal = args.includes("--") ? ["--literal-pathspecs"] : [];
-    const { stdout } = await execFileAsync(resolveCommand("git"), [...literal, "-c", "core.quotepath=false", "-c", "color.ui=false", ...args], commandOptions(cwd));
+    const options = commandOptions(cwd);
+    if (env) options.env = { ...options.env, ...env };
+    const { stdout } = await execFileAsync(resolveCommand("git"), [...literal, "-c", "core.quotepath=false", "-c", "color.ui=false", ...args], options);
     // Tabs and spaces can be meaningful (empty log refs, filenames, config values).
     return preserveOutput ? stdout : stdout.replace(/(?:\r?\n)+$/, "");
   } catch (error) {

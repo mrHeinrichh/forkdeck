@@ -1,19 +1,21 @@
-ForkDeck 1.1.3 fixes issues found during a full pass through the existing Git, identity, desktop, and interface workflows.
+ForkDeck 1.2.0 brings a redesigned desktop workspace and complete everyday Git workflows.
 
-## Fixes
+## New workflows
 
-- Commit profiles apply only to the selected repository; global Git identity remains unchanged.
-- New files and staged/unstaged changes display correctly, including unusual filenames, deleted files, and merge commits.
-- Remote checkout creates tracking branches; pushing a new branch configures its upstream.
-- Merge conflict resolution handles deleted sides; stash actions include a visible Drop control, and helper commits no longer clutter the graph.
-- Repository/folder selections persist across desktop restarts. Concurrent saves preserve all changes.
-- Small windows fit, empty commits stop loading correctly, and stale requests cannot replace a newer selection or Git action.
-- GitHub auth diagnostics check the actual push remote and effective account, and hide credentials.
-- Unsupported actions are no longer presented as working commands.
+- Compact three-panel interface with independently scrolling history, navigation and changes.
+- Staged and unstaged file groups, individual/all staging and unstaging, and a commit composer with a keyboard shortcut.
+- Amend the latest commit with a confirmation, message prefill and stale-HEAD protection.
+- Merge, rebase, cherry-pick and revert from toolbar or commit context actions.
+- Conflict recovery with Continue/Abort controls and accurate rebase-side labels.
+- Rename local branches and safely delete fully merged branches.
+- Search loaded commit history and compare the trees at any two branches, tags or commits.
+- Repository-specific commit drafts remain available while the app stays open.
 
 ## Verification
 
-Real Git regression tests use disposable repositories and local bare remotes. Browser tests use real interface clicks. Native packaged launch checks run on macOS Apple silicon, macOS Intel, and Windows x64. External GitHub account changes are simulated in tests; native folder-dialog results are stubbed.
+Actual Git tests use disposable repositories and local bare remotes. Browser checks exercise the controls and conflict states. Packaged app launch checks run natively on Apple silicon, Intel macOS, and Windows x64. The full UI suite runs on Linux Chromium. No private profiles or repositories are packaged.
+
+Line/hunk staging, interactive rebase, merge-commit cherry-pick/revert, undo/redo, worktree creation and GitHub PR/issue/team views remain outside this release. Rebase and amend rewrite commits; use them for unpublished work.
 
 ## Downloads
 

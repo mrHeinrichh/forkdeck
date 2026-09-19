@@ -52,7 +52,7 @@
           </div>
           <div>
             <h1>ForkDeck</h1>
-            <p class="subtitle">Visual Git graph, branches, stash, diffs, and commit profiles.</p>
+            <p class="subtitle">Your local Git workspace</p>
           </div>
         </div>
         <div class="toolbar-actions" aria-label="Repository toolbar">
@@ -75,8 +75,8 @@
           <button id="pullButton" type="button" class="tool-button"><i data-lucide="arrow-down-to-line"></i>Pull</button>
           <button id="pushButton" type="button" class="tool-button"><i data-lucide="arrow-up-from-line"></i>Push</button>
           <button id="authFixButton" type="button" class="tool-button auth-fix-button"><i data-lucide="key-round"></i>Fix Auth</button>
-          <button id="undoButton" type="button" class="icon-button" disabled title="Undo is not available in this version" aria-label="Undo (unavailable)"><i data-lucide="undo-2"></i></button>
-          <button id="redoButton" type="button" class="icon-button" disabled title="Redo is not available in this version" aria-label="Redo (unavailable)"><i data-lucide="redo-2"></i></button>
+          <button id="mergeButton" type="button" class="tool-button"><i data-lucide="git-merge"></i>Merge</button>
+          <button id="rebaseButton" type="button" class="tool-button"><i data-lucide="git-pull-request-arrow"></i>Rebase</button>
           <button id="stashQuickButton" type="button" class="tool-button"><i data-lucide="archive"></i>Stash</button>
           <button id="popQuickButton" type="button" class="tool-button"><i data-lucide="archive-restore"></i>Pop</button>
           <button id="refreshButton" class="icon-button" title="Refresh" aria-label="Refresh">
@@ -134,9 +134,7 @@
               <button class="nav-item" data-nav="local"><i data-lucide="git-branch"></i>Local<span id="localNavCount">0</span></button>
               <button class="nav-item" data-nav="remote"><i data-lucide="cloud"></i>Remote<span id="remoteNavCount">0</span></button>
               <button class="nav-item" data-nav="stashes"><i data-lucide="archive"></i>Stashes<span id="stashNavCount">0</span></button>
-              <button class="nav-item" data-nav="prs" disabled title="Not available in this version"><i data-lucide="git-pull-request"></i>PRs<span>0</span></button>
-              <button class="nav-item" data-nav="issues" disabled title="Not available in this version"><i data-lucide="circle-dot"></i>Issues<span>0</span></button>
-              <button class="nav-item" data-nav="teams" disabled title="Not available in this version"><i data-lucide="users"></i>Teams<span>0</span></button>
+              <button id="compareButton" class="nav-item" type="button"><i data-lucide="git-compare-arrows"></i>Compare refs</button>
             </div>
           </div>
 
@@ -190,6 +188,11 @@
             </div>
           </div>
 
+          <div id="operationBanner" class="operation-banner" role="status" hidden>
+            <div class="operation-copy"><i data-lucide="git-merge"></i><div><strong id="operationTitle"></strong><p id="operationDescription"></p></div></div>
+            <div class="operation-actions"><button id="continueOperationButton" type="button" class="accent">Continue</button><button id="abortOperationButton" type="button">Abort</button></div>
+          </div>
+
           <div class="git-grid">
             <section class="graph-panel">
               <div id="graphView">
@@ -202,7 +205,7 @@
                 </div>
                 <div class="graph-toolbar">
                   <button id="fitGraphButton" type="button"><i data-lucide="scan"></i>Fit lanes</button>
-                  <span>Click a commit to load its changed files, then choose a file to inspect.</span>
+                  <label class="history-search"><i data-lucide="search"></i><input id="historySearch" type="search" aria-label="Search loaded history" placeholder="Search message, author, hash or ref" autocomplete="off" /></label>
                   <span id="liveSyncStatus" class="live-sync-status"><i data-lucide="activity"></i>Live local sync</span>
                 </div>
                 <div id="commitGraph" class="commit-graph"></div>
@@ -227,8 +230,16 @@
                   <p id="filePanelEyebrow" class="eyebrow">Working Tree</p>
                   <h2 id="filePanelTitle">Changed Files</h2>
                 </div>
+                <button id="changesButton" type="button" class="tool-button" title="Show working changes"><i data-lucide="pencil-line"></i>Changes</button>
               </div>
               <div id="fileList" class="list"></div>
+              <form id="commitComposer" class="commit-composer">
+                <label for="commitMessage">Commit message</label>
+                <textarea id="commitMessage" rows="3" maxlength="16384" placeholder="Summarize your changes" required></textarea>
+                <div class="commit-composer-options"><label class="check-row"><input id="amendCommit" type="checkbox" />Amend last commit</label><span id="stagedSummary" class="muted">Nothing staged</span></div>
+                <button id="commitButton" class="accent" type="submit"><i data-lucide="git-commit-horizontal"></i>Commit staged changes</button>
+                <p id="commitHint" class="muted">⌘ / Ctrl + Enter to commit</p>
+              </form>
             </section>
 
             <section class="panel diff-panel">
@@ -258,6 +269,19 @@
           </div>
         </section>
       </section>
+
+      <dialog id="compareDialog" class="compare-dialog" aria-labelledby="compareTitle">
+        <div class="panel-head"><div><p class="eyebrow">History</p><h2 id="compareTitle">Compare references</h2></div><button id="compareCloseButton" type="button" class="icon-button" aria-label="Close comparison"><i data-lucide="x"></i></button></div>
+        <form id="compareForm" class="compare-form">
+          <label>Base<input id="compareBase" list="compareRefs" value="HEAD" required autocomplete="off" /></label>
+          <i data-lucide="arrow-right"></i>
+          <label>Target<input id="compareTarget" list="compareRefs" required autocomplete="off" /></label>
+          <button id="compareRunButton" type="submit" class="accent">Compare</button>
+          <datalist id="compareRefs"></datalist>
+        </form>
+        <p class="muted">Compare the exact trees at two branches, tags or commits.</p>
+        <div id="compareResult" class="compare-result" aria-live="polite">Choose two references to see their differences.</div>
+      </dialog>
 
       <section id="accountEditorPanel" class="account-editor" hidden>
         <form class="panel profile-form" id="profileForm">

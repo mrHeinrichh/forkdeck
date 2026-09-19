@@ -1,6 +1,6 @@
 # ForkDeck
 
-A local visual Git workspace for macOS and Windows. Explore commit history, work with branches and stash entries, review diffs, and switch commit identities.
+A local visual Git workspace for macOS and Windows. Stage changes, write commits, explore history, merge and rebase branches, review diffs, and switch commit identities.
 
 Created by **[Heinric Fabros](https://mrheinrich.vercel.app/)**. Visit my [portfolio](https://mrheinrich.vercel.app/) for more about me and my work.
 
@@ -43,7 +43,7 @@ npm test
 npm run dist:mac
 ```
 
-Windows installers are built on Windows with `npm run dist:win`. macOS installers are built on macOS. The GitHub Actions release workflow builds on native macOS and Windows runners, runs checks, and publishes installers with `SHA256SUMS.txt` after every platform succeeds. Push a version tag matching `package.json` (for example, `v1.1.3`) to publish a release.
+Windows installers are built on Windows with `npm run dist:win`. macOS installers are built on macOS. The GitHub Actions release workflow builds on native macOS and Windows runners, runs checks, and publishes installers with `SHA256SUMS.txt` after every platform succeeds. Push a version tag matching `package.json` (for example, `v1.2.0`) to publish a release.
 
 ## GitHub authentication repair
 
@@ -66,8 +66,10 @@ The download website can be deployed from `website/` with the Vercel CLI. Instal
 
 ## Verification and current scope
 
-Run `npm test` for Git/API, profile/auth, storage and desktop-policy regressions. Run `npx playwright install chromium` once, then `npm run test:ui` for isolated browser workflows. `npm run smoke:desktop` checks the native app with temporary data and Git configuration. See [QA coverage](docs/QA.md) for the feature inventory and testing limits.
+Run `npm test` for Git/API, profile/auth, storage and desktop-policy regressions. Run `npx playwright install chromium` once, then `npm run test:ui` and `npm run test:workspace` for isolated browser workflows. `npm run smoke:desktop` checks the native app with temporary data and Git configuration. See [QA coverage](docs/QA.md) for the feature inventory and testing limits.
 
 Commit profiles change only the selected repository's commit identity. **Fix Auth** changes the active GitHub CLI account and global GitHub HTTPS helper after its confirmation, so it can affect other repositories using that helper.
 
-Undo/redo, merge/rebase/cherry-pick/reset/revert commands, worktree creation, cloud patches, commit comparison, and GitHub PR/issue/team views are not implemented in this release. Unavailable controls are disabled or omitted.
+Version 1.2 adds a compact three-panel workspace with searchable history (latest 120 commits), staged and unstaged file groups, commit/amend, branch rename and safe deletion, exact-tree comparison, merge, rebase, cherry-pick, and revert. Operations that conflict remain visible until you resolve and continue or abort. Commit messages stay in memory per repository while the app is open. Amend retains the original author; ordinary commits use the repository identity.
+
+Start history operations with a clean working tree. Rebase and amend rewrite commits and are intended for unpublished work. Merge-commit cherry-pick/revert, interactive rebase, line/hunk staging, undo/redo, reset, linked worktree creation, cloud patches, and GitHub PR/issue/team views are not implemented. Comparison patches are limited to 512 KiB. An empty cherry-pick or revert can be aborted; skipping or keeping an empty commit requires Git outside ForkDeck.

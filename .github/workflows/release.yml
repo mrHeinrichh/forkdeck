@@ -21,11 +21,14 @@ jobs:
       - run: npm test
       - run: npx playwright install --with-deps chromium
       - run: npm run test:ui
+      - run: npm run test:workspace
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: ui-failure
-          path: output/ui-checks/
+          path: |
+            output/ui-checks/
+            output/workspace-ui-checks/
           if-no-files-found: ignore
 
   build:

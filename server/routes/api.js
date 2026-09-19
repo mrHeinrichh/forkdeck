@@ -5,6 +5,8 @@ const { appStatus } = require("../services/repoService");
 const { readGitHubAuth, fixGitHubAuth } = require("../services/githubAuthService");
 const { handleProfiles } = require("./profiles");
 const { handleRepo } = require("./repo");
+const { handleCommit } = require("./commit");
+const { handleHistory } = require("./history");
 const identityUpdates = new Map();
 
 function applyIdentity(root, profile) {
@@ -30,6 +32,9 @@ function applyIdentity(root, profile) {
 async function handleApi(req, res, url) {
   const profileHandled = await handleProfiles(req, res, url);
   if (profileHandled !== false) return;
+
+  if (await handleCommit(req, res, url) !== false) return;
+  if (await handleHistory(req, res, url) !== false) return;
 
   const repoHandled = await handleRepo(req, res, url);
   if (repoHandled !== false) return;

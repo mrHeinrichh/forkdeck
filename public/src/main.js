@@ -3,6 +3,7 @@ import { request } from "./services/api.js";
 import { graphColors, GRAPH_LANE_WIDTH, GRAPH_ROW_HEIGHT, STASH_NODE_ANCHOR_Y, REPO_LIVE_SYNC_MS } from "./git/constants.js";
 import { $, iconRefresh } from "./ui/dom.js";
 import { createActionDialog } from "./ui/actionDialog.js";
+import { createWorkspace } from "./ui/workspace.js";
 import { escapeHtml, identityText, initials, colorFromText, statusClass, highlightDiff, conflictPane } from "./utils/format.js";
 
 const accountMenuProfiles = $("#accountMenuProfiles");
@@ -49,6 +50,19 @@ const {
   runActionDialog
 } = createActionDialog({ state, $, iconRefresh, escapeHtml, showToast });
 
+function showWorkingChanges() {
+  inspectorVersion++;
+  state.inspectorOpen = false;
+  state.centerMode = "worktree";
+  state.selectedCommitFile = "";
+  renderRightFileList();
+  if (state.repo) renderCommitGraph();
+  renderInspectorMode();
+  iconRefresh();
+}
+
+const workspace = createWorkspace({ state, $, iconRefresh, showToast, confirmAction, promptAction, runActionDialog, closeActionDialog, applyRepoSnapshot, loadDiff, showChanges: showWorkingChanges, renderFiles: renderRightFileList });
+
 function setLiveSyncStatus(message = "Live local sync", mode = "idle") {
   const status = $("#liveSyncStatus");
   if (!status) return;
@@ -67,6 +81,8 @@ function repoSignature(repo) {
   return JSON.stringify({
     root: repo.root,
     identity: repo.identity,
+    operation: repo.operation,
+    headHash: repo.head,
     remote: repo.remote,
     branch: repo.branch,
     ahead: repo.ahead,
@@ -93,8 +109,8 @@ function renderRepoPreservingGraph() {
   });
 }
 
-function applyRepoSnapshot(repo, { source = "manual", preserveGraph = true } = {}) {
-  if (source === "action") { repoOpenVersion++; inspectorVersion++; }
+function applyRepoSnapshot(repo, { source = "manual", preserveGraph = true, invalidateInspector = true } = {}) {
+  if (source === "action") { repoOpenVersion++; if (invalidateInspector) inspectorVersion++; }
   const previous = state.repo;
   const previousSignature = repoSignature(previous);
   const nextSignature = repoSignature(repo);
@@ -206,8 +222,16 @@ function setDiff(selector, text) {
   if (target) target.innerHTML = highlightDiff(text);
 }
 
+function conflictLabels() {
+  const rebase = state.repo?.operation?.type === "rebase";
+  return { ours: rebase ? "Rebase target" : "Current", theirs: rebase ? "Replayed commit" : "Incoming",
+    oursDetail: rebase ? "Target branch / ours" : "Current checkout / ours",
+    theirsDetail: rebase ? "Your commit being replayed / theirs" : "Change being applied / theirs" };
+}
+
 function renderConflictResolver(payload) {
   const file = escapeHtml(payload.file);
+  const labels = conflictLabels();
   $("#commitPatch").innerHTML = `
     <div class="conflict-resolver">
       <div class="conflict-summary">
@@ -215,13 +239,13 @@ function renderConflictResolver(payload) {
         <span>Review each side, then choose which version to stage as resolved.</span>
       </div>
       <div class="conflict-action-bar conflict-action-bar-main">
-        <button type="button" data-conflict-resolve="ours" data-conflict-file="${file}"><i data-lucide="check"></i>Accept Current</button>
-        <button type="button" data-conflict-resolve="theirs" data-conflict-file="${file}"><i data-lucide="arrow-down-left"></i>Accept Incoming</button>
+        <button type="button" data-conflict-resolve="ours" data-conflict-file="${file}"><i data-lucide="check"></i>Accept ${labels.ours}</button>
+        <button type="button" data-conflict-resolve="theirs" data-conflict-file="${file}"><i data-lucide="arrow-down-left"></i>Accept ${labels.theirs}</button>
         <button type="button" data-conflict-resolve="mark" data-conflict-file="${file}"><i data-lucide="badge-check"></i>Mark Resolved</button>
       </div>
       <div class="conflict-grid">
-        ${conflictPane("Current", "Your branch / ours", payload.ours, "ours")}
-        ${conflictPane("Incoming", "Merged branch / theirs", payload.theirs, "theirs")}
+        ${conflictPane(labels.ours, labels.oursDetail, payload.ours, "ours")}
+        ${conflictPane(labels.theirs, labels.theirsDetail, payload.theirs, "theirs")}
         ${conflictPane("Base", "Common ancestor", payload.base, "base")}
         ${conflictPane("Working File", "Conflict markers in the file", payload.current, "working")}
       </div>
@@ -249,6 +273,7 @@ function commitRefItems(commit) {
     .split(",")
     .map((ref) => ref.trim())
     .filter((ref) => !/^refs\/stash\b/.test(ref) && !/^stash\b/.test(ref))
+    .filter((ref) => !ref.endsWith("/HEAD"))
     .filter(Boolean)
     .map((ref) => {
       const clean = ref.replace(/^HEAD -> /, "").replace(/^tag: /, "");
@@ -321,6 +346,12 @@ function contextMenuItems(commit) {
     { id: "checkout", label: "Checkout", icon: "git-branch", disabled: !branchRef, detail: branchRef?.clean || "No branch ref" },
     { id: "branch", label: "Create branch here", icon: "git-branch-plus" },
     { id: "explain", label: "View commit details", icon: "file-text" },
+    { id: "compare", label: "Compare with HEAD", icon: "git-compare-arrows" },
+    { separator: true },
+    { id: "merge", label: "Merge into current branch", icon: "git-merge" },
+    { id: "rebase", label: "Rebase current branch here", icon: "git-pull-request-arrow" },
+    { id: "cherry-pick", label: "Cherry-pick commit", icon: "git-pull-request-arrow", disabled: commit.parents.length > 1 },
+    { id: "revert", label: "Revert commit", icon: "undo-2", disabled: commit.parents.length > 1 },
     { separator: true },
     { id: "copy-branch", label: "Copy branch", icon: "copy", disabled: !branchRef },
     { id: "copy-commit", label: "Copy commit hash", icon: "copy" },
@@ -474,6 +505,8 @@ async function handleCommitContextAction(action, hash) {
   const remoteUrl = commitRemoteUrl(commit);
   const branchName = branchRef?.clean || state.repo?.branch || "";
 
+  if (["merge", "rebase", "cherry-pick", "revert"].includes(action)) return workspace.integrate(action, commit.hash);
+  if (action === "compare") return workspace.openCompare(commit.hash);
   if (action === "explain") return loadCommitDetails(commit.hash, false, true);
   if (action === "copy-commit") return copyText(commit.hash, "Commit hash");
   if (action === "copy-branch") return copyText(branchName, "Branch");
@@ -502,6 +535,7 @@ function renderRightFileList() {
   const repo = state.repo;
   if (!repo) return;
 
+  workspace.render();
   const showingCommit = state.centerMode === "commit";
   $("#filePanelEyebrow").textContent = showingCommit ? "Commit" : "Working Tree";
   $("#filePanelTitle").textContent = showingCommit ? "Changed Files" : "Changed Files";
@@ -518,14 +552,18 @@ function renderRightFileList() {
     return;
   }
 
-  $("#fileList").innerHTML = repo.files.length
-    ? repo.files.map((file) => `
-      <button class="row file-row ${statusClass(file.label)} ${file.file === state.selectedFile ? "is-current" : ""}" data-file="${escapeHtml(file.file)}">
-        <span><i data-lucide="file-diff"></i>${escapeHtml(file.file)}</span>
-        <small>${escapeHtml(file.label)}</small>
+  const conflicts = repo.files.filter(workspace.isConflict);
+  const unstaged = repo.files.filter((file) => !workspace.isConflict(file) && (file.worktree !== " " || file.index === "?"));
+  const staged = repo.files.filter((file) => !workspace.isConflict(file) && ![" ", "?"].includes(file.index));
+  const group = (label, files, action) => `<section class="changes-group"><div class="changes-group-heading"><strong>${label} <span>${files.length}</span></strong>${action ? `<button type="button" id="${action === "stage" ? "stageAllButton" : "unstageAllButton"}" data-stage-all="${action}" ${files.length && !state.repoActionInFlight ? "" : "disabled"}>${action === "stage" ? "Stage all" : "Unstage all"}</button>` : ""}</div>${files.map((file) => `
+    <div class="change-file-item">
+      <button type="button" class="row file-row ${statusClass(file.label)} ${file.file === state.selectedFile ? "is-current" : ""}" data-file="${escapeHtml(file.file)}" title="${escapeHtml(file.file)}">
+        <span><i data-lucide="file-diff"></i>${escapeHtml(file.file)}</span><small>${escapeHtml(file.label)}</small>
       </button>
-    `).join("")
-    : `<div class="empty compact-empty">Working tree is clean.</div>`;
+      ${action ? `<button type="button" class="file-stage-button" data-stage-file="${escapeHtml(file.file)}" data-stage-action="${action}" aria-label="${action === "stage" ? "Stage" : "Unstage"} ${escapeHtml(file.file)}" title="${action === "stage" ? "Stage" : "Unstage"} file" ${state.repoActionInFlight ? "disabled" : ""}><i data-lucide="${action === "stage" ? "plus" : "minus"}"></i></button>` : ""}
+    </div>`).join("") || `<p class="empty compact-empty">${label === "Staged" ? "Stage files to include them in your commit." : "No unstaged changes."}</p>`}</section>`;
+  $("#fileList").innerHTML = `${conflicts.length ? group("Conflicts", conflicts, "") : ""}${group("Unstaged", unstaged, "stage")}${group("Staged", staged, "unstage")}`;
+  if (!repo.files.length) $("#fileList").insertAdjacentHTML("afterbegin", '<div class="clean-worktree"><i data-lucide="check-check"></i>Working tree is clean.</div>');
 }
 
 function fillForm(profile = {}) {
@@ -714,6 +752,7 @@ function clearRepoView() {
   $("#localNavCount").textContent = "0";
   $("#remoteNavCount").textContent = "0";
   $("#stashNavCount").textContent = "0";
+  workspace.render();
   $("#toolbarBranchList").innerHTML = `<div class="empty compact-empty">No repository open.</div>`;
   $("#localBranchList").innerHTML = "";
   $("#remoteBranchList").innerHTML = "";
@@ -730,6 +769,7 @@ function clearRepoView() {
 }
 
 async function closeRepoTab(path) {
+  if (state.repoActionInFlight) return showToast("Wait for the current Git action before closing a repository.");
   const closingIndex = state.repos.findIndex((repo) => repo.root === path);
   const wasActive = path === state.repoPath;
   const payload = await request(`/api/repos/${encodeURIComponent(path)}`, { method: "DELETE" });
@@ -809,6 +849,7 @@ async function cloneRepo() {
 }
 
 async function openRepo(path = state.repoPath) {
+  if (state.repoActionInFlight) return showToast("Wait for the current Git action before switching repositories.");
   if (!path) return showToast("Paste a local repository path first.");
   const version = ++repoOpenVersion;
   const mutationVersion = state.repoMutationVersion;
@@ -834,14 +875,16 @@ async function openRepo(path = state.repoPath) {
 
 async function browsePath(path = state.browserPath) {
   const version = ++browserVersion;
+  const target = state.browserTarget;
+  const input = target === "local" ? $("#localPathInput") : $("#cloneDestination");
+  const initialValue = input.value;
   const payload = await request(`/api/fs?path=${encodeURIComponent(path)}`);
-  if (version !== browserVersion) return;
+  if (version !== browserVersion || target !== state.browserTarget) return;
   state.browserPath = payload.path;
   state.browserParent = payload.parent;
   savePreference("browserPath", payload.path);
   $("#pathBrowserCurrent").textContent = payload.path;
-  if (state.browserTarget === "local") $("#localPathInput").value = payload.path;
-  else $("#cloneDestination").value = payload.path;
+  if (input.value === initialValue) input.value = payload.path;
   $("#pathBrowserList").innerHTML = `
     <button class="path-row ${payload.isGitRepo ? "is-git" : ""}" data-select-path="${escapeHtml(payload.path)}">
       <i data-lucide="${payload.isGitRepo ? "folder-git-2" : "folder"}"></i>
@@ -901,10 +944,13 @@ function renderRepo() {
 
   $("#localBranchList").innerHTML = repo.branches.length
     ? repo.branches.map((branch) => `
-      <button class="side-row ${branch.current ? "is-current" : ""}" data-checkout="${escapeHtml(branch.name)}">
-        <i data-lucide="git-branch"></i>
-        <span>${escapeHtml(branch.name)}</span>
-      </button>
+      <div class="branch-item">
+        <button class="side-row ${branch.current ? "is-current" : ""}" data-checkout="${escapeHtml(branch.name)}" title="${escapeHtml(branch.name)}"><i data-lucide="git-branch"></i><span>${escapeHtml(branch.name)}</span></button>
+        <div class="branch-actions">
+          <button class="branch-action" data-branch-action="rename" data-branch="${escapeHtml(branch.name)}" aria-label="Rename ${escapeHtml(branch.name)}" title="Rename branch"><i data-lucide="pencil"></i></button>
+          <button class="branch-action" data-branch-action="delete" data-branch="${escapeHtml(branch.name)}" aria-label="Delete ${escapeHtml(branch.name)}" title="Delete merged branch" ${branch.current ? "disabled" : ""}><i data-lucide="trash-2"></i></button>
+        </div>
+      </div>
     `).join("")
     : `<div class="empty compact-empty">No local branches.</div>`;
 
@@ -1002,11 +1048,11 @@ function refPills(refs) {
 
 function branchRail(refs, extra = "", color = "#18c7b8") {
   const items = commitRefItemsFromRefs(refs)
-    .filter((ref) => ref.kind !== "tag")
+    .filter((ref) => ref.kind !== "tag" && ref.clean !== "HEAD")
     .map((ref) => {
       const branchName = ref.clean.replace(/^origin\//, "");
       const isCurrent = ref.kind === "branch" && branchName === state.repo?.branch;
-      const icon = ref.kind === "remote" ? "github" : "monitor";
+      const icon = ref.kind === "remote" ? "cloud" : "monitor";
       return `
         <button
           type="button"
@@ -1172,9 +1218,12 @@ function graphLaneRailsMarkup(laneCount) {
 function renderCommitGraph() {
   const repo = state.repo;
   const graph = $("#commitGraph");
-  $("#graphCount").textContent = `${repo.commits.length} commits`;
+  const query = $("#historySearch").value.trim().toLocaleLowerCase();
+  const allRows = graphRows(repo.commits);
+  const rows = query ? allRows.filter(({ commit }) => `${commit.subject} ${commit.author} ${commit.hash} ${commit.refs}`.toLocaleLowerCase().includes(query)) : allRows;
+  graph.classList.toggle("is-searching", Boolean(query));
+  $("#graphCount").textContent = query ? `${rows.length} / ${repo.commits.length} loaded` : `${repo.commits.length} commits`;
 
-  const rows = graphRows(repo.commits);
   const activeLaneCount = Math.max(1, ...rows.map((row) => row.active.length));
   const stashLaneCount = repo.stashes.length ? 2 : 0;
   const graphLaneCount = activeLaneCount + stashLaneCount;
@@ -1200,8 +1249,8 @@ function renderCommitGraph() {
 
   const commitRowsMarkup = rows
     .map(({ commit, lane, active, bridges, parentCount, isNewHead, isTerminal }) => {
-      const selected = commit.hash === state.selectedCommit ? " is-selected" : "";
-      const attachedStashes = stashes.byCommit.get(commit.hash) || [];
+      const selected = state.centerMode === "commit" && commit.hash === state.selectedCommit ? " is-selected" : "";
+      const attachedStashes = query ? [] : stashes.byCommit.get(commit.hash) || [];
       const laneMarkup = Array.from({ length: graphLaneCount }, (_, index) => {
         const value = active[index] || "";
         const color = graphColors[index % graphColors.length];
@@ -1236,7 +1285,7 @@ function renderCommitGraph() {
     .join("");
   const unplacedStashRows = stashes.unplaced.map((item) => stashRowMarkup(item, graphLaneCount, 0, [], activeLaneCount)).join("");
 
-  graph.innerHTML = `${graphLaneRailsMarkup(activeLaneCount)}${wipRows}${commitRowsMarkup}${unplacedStashRows}`;
+  graph.innerHTML = query ? (commitRowsMarkup || '<div class="empty compact-empty">No matches in the latest 120 loaded commits.</div>') : `${graphLaneRailsMarkup(activeLaneCount)}${wipRows}${commitRowsMarkup}${unplacedStashRows}`;
   iconRefresh();
 }
 
@@ -1426,21 +1475,21 @@ async function loadConflict(file) {
   renderRepo();
   $("#commitDetailTitle").textContent = file;
   $("#commitMeta").innerHTML = `
-    <span>Merge conflict</span>
+    <span>Git conflict</span>
     <span>${escapeHtml(state.repo?.branch || "No branch")}</span>
-    <span>Choose current or incoming</span>
+    <span>Review each Git side before resolving</span>
   `;
   $("#commitFiles").innerHTML = `
     <div class="conflict-action-bar">
-      <button type="button" data-conflict-resolve="ours" data-conflict-file="${escapeHtml(file)}"><i data-lucide="check"></i>Accept Current</button>
-      <button type="button" data-conflict-resolve="theirs" data-conflict-file="${escapeHtml(file)}"><i data-lucide="arrow-down-left"></i>Accept Incoming</button>
+      <button type="button" data-conflict-resolve="ours" data-conflict-file="${escapeHtml(file)}"><i data-lucide="check"></i>Accept ${conflictLabels().ours}</button>
+      <button type="button" data-conflict-resolve="theirs" data-conflict-file="${escapeHtml(file)}"><i data-lucide="arrow-down-left"></i>Accept ${conflictLabels().theirs}</button>
       <button type="button" data-conflict-resolve="mark" data-conflict-file="${escapeHtml(file)}"><i data-lucide="badge-check"></i>Mark Resolved</button>
     </div>
   `;
   $("#commitPatch").textContent = "Loading conflict sides...";
   renderInspectorMode();
   $("#diffTitle").textContent = file;
-  $("#diffView").textContent = "Merge conflict open. Accept a side in the main inspector.";
+  $("#diffView").textContent = "Git conflict open. Accept a side in the main inspector.";
   iconRefresh();
   const payload = await request(`/api/repo/conflict?path=${encodeURIComponent(path)}&file=${encodeURIComponent(file)}`);
   if (version !== inspectorVersion || path !== state.repoPath || state.centerMode !== "worktree") return;
@@ -1450,15 +1499,15 @@ async function loadConflict(file) {
 async function resolveConflict(file, action) {
   const path = state.repoPath;
   const labels = {
-    ours: "Accept Current",
-    theirs: "Accept Incoming",
+    ours: `Accept ${conflictLabels().ours}`,
+    theirs: `Accept ${conflictLabels().theirs}`,
     mark: "Mark Resolved"
   };
   const detail = action === "mark"
     ? "stage the file as resolved using its current contents"
-    : `replace the working file with the ${action === "ours" ? "current branch" : "incoming branch"} version and stage it as resolved`;
+    : `replace the working file with the ${action === "ours" ? conflictLabels().ours : conflictLabels().theirs} version and stage it as resolved`;
   const confirmed = await confirmAction({
-    eyebrow: "Merge Conflict",
+    eyebrow: "Git Conflict",
     title: `${labels[action] || "Resolve"}?`,
     message: `${file}: this will ${detail}.`,
     icon: "git-merge",
@@ -1466,7 +1515,7 @@ async function resolveConflict(file, action) {
   });
   if (!confirmed) return;
   const repo = await runActionDialog({
-    eyebrow: "Merge Conflict",
+    eyebrow: "Git Conflict",
     runningTitle: "Resolving conflict...",
     runningMessage: "Applying your selected conflict resolution and staging the file.",
     successTitle: "Conflict staged",
@@ -1733,6 +1782,8 @@ async function fixGitHubAuth() {
 }
 
 function bindEvents() {
+  workspace.bind();
+  $("#historySearch").addEventListener("input", () => { if (state.repo) renderCommitGraph(); });
   document.addEventListener("error", (event) => {
     const image = event.target?.closest?.(".graph-node img");
     if (!image) return;
@@ -1910,6 +1961,8 @@ function bindEvents() {
   });
 
   $("#localBranchList").addEventListener("click", (event) => {
+    const action = event.target.closest("[data-branch-action]");
+    if (action && !action.disabled) return workspace.branchAction(action.dataset.branchAction, action.dataset.branch).catch((error) => showToast(error.message));
     const button = event.target.closest("[data-checkout]");
     if (button && !button.classList.contains("is-current")) checkoutBranch(button.dataset.checkout).catch((error) => showToast(error.message));
   });
@@ -1920,6 +1973,10 @@ function bindEvents() {
   });
 
   $("#fileList").addEventListener("click", (event) => {
+    const stageFile = event.target.closest("[data-stage-file]");
+    const stageAll = event.target.closest("[data-stage-all]");
+    if (stageFile) return workspace.stage(stageFile.dataset.stageFile, stageFile.dataset.stageAction === "unstage");
+    if (stageAll) return workspace.stage(undefined, stageAll.dataset.stageAll === "unstage");
     const button = event.target.closest("[data-file]");
     const commitFile = event.target.closest("[data-commit-file]");
     if (commitFile) loadCommitFileDiff(commitFile.dataset.commitFile).catch((error) => showToast(error.message));

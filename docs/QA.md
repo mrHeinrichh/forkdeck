@@ -18,4 +18,19 @@ All mutation checks use disposable repositories and an isolated Git configuratio
 | Interface | Loading/empty/error states, rapid selection races, viewport 960×640 and 1440×960, dialogs, disabled unavailable controls | Browser checks/screenshots + native smoke |
 | Packaging | macOS arm64/x64 and Windows x64 installable builds and launch checks | Release workflow |
 
-Unavailable in this release: undo/redo, merge/rebase/cherry-pick/reset/revert commands, worktree creation, cloud patches, commit comparison, GitHub PR/issue/team views. Unsupported context-menu commands are omitted; reserved toolbar/navigation controls are disabled and labelled unavailable.
+## Version 1.2 workflow inventory
+
+| Control / claim | Functional check | Visual / recovery check |
+| --- | --- | --- |
+| Unstaged / staged file groups; single/all stage and unstage | Actual index contents including unborn repos, rename/deletion/literal filenames; preserve working edits | Empty groups, mixed staged/unstaged file appears in both groups, buttons stay usable |
+| Commit composer / Cmd or Ctrl+Enter / amend | Commit only staged content; prefill original message; preserve authorship; reject stale HEAD | Empty-message guard, per-repository drafts, explicit amend confirmation |
+| Merge / rebase toolbar and commit context commands | Fast-forward/diverged merges and rebase; regular cherry-pick/revert | Clean-worktree rejection, conflicts return a visible operation banner |
+| Conflict Continue / Abort | Every operation tested through conflict, resolution, continuation and abort | Rebase sides accurately labelled; empty cherry-pick cannot falsely continue |
+| Rename / delete branch | Rename current and other branches; refuse unmerged or checked-out deletion | Accessible branch controls and confirmation |
+| Search loaded history | Message, author, hash and ref filtering over latest 120 commits | Matching count, no results, no misleading graph lines on filtered results |
+| Compare refs dialog | Exact-tree patch, changed files, renamed paths and divergence; bounded output | Error, identical trees, keyboard close and focus |
+| Dense desktop layout | Existing browser and native smoke suites still pass | Independent scroll, 960×640 and 1440×900, composer visible and no horizontal page overflow |
+
+UI automation lives in `scripts/test-ui.js` and `scripts/test-workspace-ui.js`. New server regressions live in `tests/commit-workflows.test.js` and `tests/history-workflows.test.js`. Off-happy-path cases include stale HEAD during amend, literal pathspec characters, dirty worktree rejection, empty cherry-pick, and a rebase that pauses at multiple conflicts.
+
+Not implemented: line/hunk staging, interactive rebase, merge-commit cherry-pick/revert, undo/redo, reset, worktree creation, cloud patches, GitHub PR/issue/team views. External authenticated network operations continue to use local bare remote fixtures in tests.

@@ -101,6 +101,7 @@ function closeActionDialog(result = false) {
 }
 
 function confirmAction(options) {
+  if (state.repoActionInFlight) { showToast("Wait for the current Git action to finish."); return Promise.resolve(false); }
   return new Promise((resolve) => {
     if (state.actionDialogResolve) state.actionDialogResolve(false);
     state.actionDialogResolve = resolve;
@@ -109,6 +110,7 @@ function confirmAction(options) {
 }
 
 function promptAction(options) {
+  if (state.repoActionInFlight) { showToast("Wait for the current Git action to finish."); return Promise.resolve(null); }
   return new Promise((resolve) => {
     if (state.actionDialogResolve) state.actionDialogResolve(null);
     state.actionDialogResolve = resolve;

@@ -196,7 +196,7 @@ async function main() {
     });
 
     await run("combined staged and unstaged preview", async () => {
-      await attribute("#fileList [data-file]", "data-file", "src/message.txt").click();
+      await attribute("#fileList [data-file]", "data-file", "src/message.txt").first().click();
       await text("#commitPatch", /Staged changes[\s\S]*value = staged[\s\S]*Unstaged changes[\s\S]*value = working/);
     });
 
