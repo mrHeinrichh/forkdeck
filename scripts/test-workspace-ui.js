@@ -73,6 +73,7 @@ async function main() {
     git(fixture.beta, "add", ".");
     git(fixture.beta, "commit", "-m", "Main-only commit");
     git(fixture.beta, "branch", "merged-old");
+    git(fixture.alpha, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
 
     server = await startServer(root, fixture);
     browser = await chromium.launch({ headless: true });
@@ -222,6 +223,25 @@ async function main() {
       }
     });
     await addRepo(fixture.alpha);
+
+    await run("symbolic remote HEAD and detached HEAD never appear as checkout branches", async () => {
+      const verifyBranches = async () => {
+        assert.equal(await page.locator('[data-graph-branch="origin/HEAD"]').count(), 0);
+        assert.equal(await page.locator('[data-checkout="origin/HEAD"]').count(), 0);
+        assert.equal(await page.locator('[data-graph-branch="HEAD"]').count(), 0);
+        assert.equal(await page.locator('[data-checkout="HEAD"]').count(), 0);
+        assert.ok(await page.locator('[data-graph-branch="origin/main"]').count(), "Ordinary remote branch must remain on the graph");
+        assert.ok(await page.locator('[data-checkout="origin/main"]').count(), "Ordinary remote branch must remain in the sidebar");
+      };
+      await verifyBranches();
+      git(fixture.alpha, "checkout", "--detach", "HEAD");
+      await refresh();
+      await text("#branchPill", "detached");
+      await verifyBranches();
+      git(fixture.alpha, "checkout", "main");
+      await refresh();
+      await text("#branchPill", "main");
+    });
 
     await run("stage and unstage individual files and all files", async () => {
       assert.deepEqual(staged(fixture.alpha), ["src/message.txt"]);

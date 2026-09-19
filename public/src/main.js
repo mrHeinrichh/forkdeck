@@ -1031,6 +1031,7 @@ function commitRefItemsFromRefs(refs) {
     .split(",")
     .map((ref) => ref.trim())
     .filter((ref) => !/^refs\/stash\b/.test(ref) && !/^stash\b/.test(ref))
+    .filter((ref) => !ref.endsWith("/HEAD"))
     .filter(Boolean)
     .map((ref) => {
       const clean = ref.replace(/^HEAD -> /, "");

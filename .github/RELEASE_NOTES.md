@@ -1,4 +1,4 @@
-ForkDeck 1.2.0 brings a redesigned desktop workspace and complete everyday Git workflows.
+ForkDeck 1.2.1 brings a redesigned desktop workspace and complete everyday Git workflows.
 
 ## New workflows
 
@@ -9,6 +9,7 @@ ForkDeck 1.2.0 brings a redesigned desktop workspace and complete everyday Git w
 - Conflict recovery with Continue/Abort controls and accurate rebase-side labels.
 - Rename local branches and safely delete fully merged branches.
 - Search loaded commit history and compare the trees at any two branches, tags or commits.
+- Symbolic remote HEAD aliases are omitted from branch shortcuts, including graph decorations.
 - Repository-specific commit drafts remain available while the app stays open.
 
 ## Verification
