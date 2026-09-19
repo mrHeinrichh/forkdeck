@@ -2,6 +2,8 @@
 
 A local visual Git workspace for macOS and Windows. Explore commit history, work with branches and stash entries, review diffs, and switch commit identities.
 
+Created by **[Heinric Fabros](https://mrheinrich.vercel.app/)**. Visit my [portfolio](https://mrheinrich.vercel.app/) for more about me and my work.
+
 ## Download
 
 Visit the [download website](https://forkdeck.vercel.app), or download installers from [GitHub Releases](https://github.com/mrHeinrichh/forkdeck/releases/latest). Each release includes SHA-256 checksums.

@@ -21,7 +21,10 @@
     "identity",
     "commits"
   ],
-  "author": "Heinrich",
+  "author": {
+    "name": "Heinric Fabros",
+    "url": "https://mrheinrich.vercel.app/"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",

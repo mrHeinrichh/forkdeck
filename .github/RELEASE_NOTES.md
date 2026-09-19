@@ -13,3 +13,7 @@ The macOS app is ad-hoc signed for bundle integrity but is not Apple notarized. 
 Profiles and the repository list are stored per user, outside the installed app. Builds do not contain the developer's local profiles or repositories.
 
 Download website: https://forkdeck.vercel.app
+
+## Author
+
+Created by **[Heinric Fabros](https://mrheinrich.vercel.app/)**. Visit the [portfolio](https://mrheinrich.vercel.app/) for more about the author and their work.
