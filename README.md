@@ -43,7 +43,7 @@ npm test
 npm run dist:mac
 ```
 
-Windows installers are built on Windows with `npm run dist:win`. macOS installers are built on macOS. The GitHub Actions release workflow builds on native macOS and Windows runners, runs checks, and publishes installers with `SHA256SUMS.txt` after every platform succeeds. Push a version tag matching `package.json` (for example, `v1.1.2`) to publish a release.
+Windows installers are built on Windows with `npm run dist:win`. macOS installers are built on macOS. The GitHub Actions release workflow builds on native macOS and Windows runners, runs checks, and publishes installers with `SHA256SUMS.txt` after every platform succeeds. Push a version tag matching `package.json` (for example, `v1.1.3`) to publish a release.
 
 ## GitHub authentication repair
 

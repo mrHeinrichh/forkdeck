@@ -1,4 +1,4 @@
-ForkDeck 1.1.2 fixes issues found during a full pass through the existing Git, identity, desktop, and interface workflows.
+ForkDeck 1.1.3 fixes issues found during a full pass through the existing Git, identity, desktop, and interface workflows.
 
 ## Fixes
 

@@ -7,7 +7,8 @@ const path = require("node:path");
 const http = require("node:http");
 const { execFileSync } = require("node:child_process");
 
-const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "forkdeck-git-workflows-")));
+// Native realpath expands Windows 8.3 aliases (e.g. RUNNER~1) just as Git does.
+const temporary = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "forkdeck-git-workflows-")));
 process.env.FORKDECK_DATA_DIR = path.join(temporary, "app data");
 process.env.GIT_CONFIG_GLOBAL = path.join(temporary, "gitconfig");
 process.env.GIT_CONFIG_NOSYSTEM = "1";

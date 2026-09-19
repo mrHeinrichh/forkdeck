@@ -12,7 +12,7 @@ async function eventually(check, message, timeout = 15000) {
     try { if (await check()) return; } catch (error) { lastError = error; }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error(message, lastError ? { cause: lastError } : undefined);
+  throw new Error(typeof message === "function" ? message() : message, lastError ? { cause: lastError } : undefined);
 }
 
 function deferred() {
@@ -24,9 +24,13 @@ function deferred() {
 async function main() {
   const { chromium } = require("playwright");
   const root = path.resolve(__dirname, "..");
+  const artifacts = path.join(root, "output", "ui-checks");
+  await fs.mkdir(artifacts, { recursive: true });
+  await Promise.all(["ui-failure.png", "ui-failure.html", "diagnostics.json", "trace.zip", "result.json"].map((name) => fs.rm(path.join(artifacts, name), { force: true })));
   const fixture = createFixtures();
   let server;
   let browser;
+  let context;
   let page;
   let passed = 0;
   let current = "setup";
@@ -34,12 +38,16 @@ async function main() {
   const pageErrors = [];
   const consoleErrors = [];
   const failedResponses = [];
+  const failedRequests = [];
+  const apiHistory = [];
+  const responseBodies = new Set();
   const expectedResponses = new Set();
   const run = async (name, task) => { current = name; await task(); passed += 1; };
   try {
     server = await startServer(root, fixture);
     browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
     // Seed only the fixture's initial browsing location; never list the user's home.
     await context.addInitScript((scratch) => {
       if (!localStorage.getItem("browserPath")) localStorage.setItem("browserPath", scratch);
@@ -55,12 +63,52 @@ async function main() {
     page.setDefaultTimeout(15000);
     page.on("pageerror", (error) => pageErrors.push(error.message));
     page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-    page.on("response", (response) => { if (response.status() >= 400) failedResponses.push(response); });
-    await page.goto(server.origin);
-    const text = (selector, expected) => eventually(async () => {
-      const actual = await page.locator(selector).textContent();
-      return expected instanceof RegExp ? expected.test(actual || "") : actual === expected;
-    }, `${selector} did not show ${expected}`);
+    page.on("requestfailed", (request) => failedRequests.push({ method: request.method(), url: request.url(), error: request.failure()?.errorText }));
+    page.on("response", (response) => {
+      if (response.status() >= 400) failedResponses.push(response);
+      const url = new URL(response.url());
+      if (url.origin !== server.origin || !url.pathname.startsWith("/api/")) return;
+      const record = { method: response.request().method(), url: response.url(), status: response.status() };
+      apiHistory.push(record);
+      if (apiHistory.length > 100) apiHistory.shift();
+      if (response.status() >= 400 || url.pathname === "/api/repo/diff") {
+        const pending = response.text().then((body) => { record.body = body.slice(0, 12000); }, (error) => { record.bodyError = error.message; });
+        responseBodies.add(pending);
+        pending.finally(() => responseBodies.delete(pending));
+      }
+    });
+    const text = (selector, expected) => {
+      let actual;
+      return eventually(async () => {
+        actual = await page.locator(selector).textContent();
+        return expected instanceof RegExp ? expected.test(actual || "") : actual === expected;
+      }, () => `${selector} did not show ${expected}; actual text: ${JSON.stringify(actual?.slice(0, 3000))}`);
+    };
+    await run("initial loading blocks actions until startup finishes", async () => {
+      const release = deferred();
+      let delayed = false;
+      const matcher = (url) => url.pathname === "/api/status";
+      const handler = async (route) => { delayed = true; await release.promise; await route.continue(); };
+      await page.route(matcher, handler);
+      try {
+        await page.goto(server.origin, { waitUntil: "domcontentloaded" });
+        await eventually(() => delayed, "The initial status request was not intercepted");
+        assert.equal(await page.locator(".shell").evaluate((shell) => shell.inert), true);
+        assert.equal(await page.locator("body").getAttribute("aria-busy"), "true");
+        // A real pointer click must be ignored while startup is pending. Force
+        // bypasses Playwright's actionability wait, not Chromium's inert behavior.
+        await page.locator("#newRepoTabButton").click({ force: true });
+        assert.equal(await page.locator("#repoDialog").isVisible(), false);
+        assert.equal(apiHistory.some((response) => new URL(response.url).pathname === "/api/fs"), false);
+        release.resolve();
+        await eventually(() => page.locator("body").getAttribute("data-ready").then((ready) => ready === "true"), "Application startup did not finish");
+        assert.equal(await page.locator(".shell").evaluate((shell) => shell.inert), false);
+        assert.equal(await page.locator("body").getAttribute("aria-busy"), null);
+      } finally {
+        release.resolve();
+        await page.unroute(matcher, handler);
+      }
+    });
     const attribute = (scope, name, value) => page.locator(`${scope}[${name}=${JSON.stringify(value)}]`);
     const tab = (repo) => attribute("#repoTabs .repo-tab", "data-repo-path", repo);
     const repoReady = async (repo) => {
@@ -287,7 +335,8 @@ async function main() {
         await text("#branchPill", "feature/ui-response-safety");
         await page.locator("#actionDialogConfirm").click();
       }, async () => {
-        await text("#branchPill", "feature/ui-response-safety");
+        // Assert immediately after delivery; a later poll must not hide a stale overwrite.
+        assert.equal(await page.locator("#branchPill").textContent(), "feature/ui-response-safety");
         assert.equal(fixture.git(fixture.alpha, "branch", "--show-current"), "feature/ui-response-safety");
       });
     });
@@ -302,8 +351,8 @@ async function main() {
         await text("#stashNavCount", "1");
         await page.locator("#actionDialogConfirm").click();
       }, async () => {
-        await text("#changePill", "0 changes");
-        await text("#stashNavCount", "1");
+        assert.equal(await page.locator("#changePill").textContent(), "0 changes");
+        assert.equal(await page.locator("#stashNavCount").textContent(), "1");
         assert.equal(fixture.git(fixture.alpha, "status", "--porcelain"), "");
         assert.match(fixture.git(fixture.alpha, "stash", "list"), /UI delayed snapshot fixture/);
       });
@@ -317,14 +366,29 @@ async function main() {
       assert.deepEqual(consoleErrors.filter((message) => !/^Failed to load resource: the server responded with a status of 400\b/.test(message)), []);
     });
     success = true;
+    await fs.writeFile(path.join(artifacts, "result.json"), JSON.stringify({ ok: true, passed, platform: process.platform, node: process.version }, null, 2));
     console.log(`ForkDeck UI: ${passed} checks passed (isolated Chromium, Git repositories, and local bare remotes).`);
   } catch (error) {
+    let dom = {};
     if (page && !page.isClosed()) {
-      await page.screenshot({ path: path.join(fixture.scratch, "ui-failure.png"), fullPage: true }).catch(() => {});
-      await fs.writeFile(path.join(fixture.scratch, "ui-failure.html"), await page.content()).catch(() => {});
+      await page.screenshot({ path: path.join(artifacts, "ui-failure.png"), fullPage: true, timeout: 5000 }).catch(() => {});
+      await fs.writeFile(path.join(artifacts, "ui-failure.html"), await page.content()).catch(() => {});
+      dom = await page.evaluate(() => ({
+        title: document.title, ready: document.body.dataset.ready, busy: document.body.getAttribute("aria-busy"),
+        shellInert: document.querySelector(".shell")?.inert, viewport: { width: innerWidth, height: innerHeight, scrollWidth: document.documentElement.scrollWidth },
+        text: Object.fromEntries(["repoName", "commitDetailTitle", "commitPatch", "fileList", "toast", "branchPill", "actionDialogTitle", "accountButtonLabel"].map((id) => [id, document.getElementById(id)?.textContent?.slice(0, 20000)]))
+      })).catch((failure) => ({ captureError: failure.message }));
     }
+    await Promise.race([Promise.allSettled([...responseBodies]), new Promise((resolve) => setTimeout(resolve, 2000))]);
+    const diagnostics = { ok: false, current, passed, error: error.stack, platform: process.platform, node: process.version, fixture: fixture.scratch,
+      dom, pageErrors, consoleErrors, failedRequests,
+      failedResponses: failedResponses.map((response) => ({ method: response.request().method(), url: response.url(), status: response.status(), expected: expectedResponses.has(response) })),
+      apiHistory, server: server?.diagnostics() };
+    await fs.writeFile(path.join(artifacts, "diagnostics.json"), JSON.stringify(diagnostics, null, 2)).catch(() => {});
+    if (context) await context.tracing.stop({ path: path.join(artifacts, "trace.zip") }).catch(() => {});
     console.error(`ForkDeck UI failed: ${current}`);
-    console.error(`Artifacts: ${fixture.scratch}`);
+    console.error(JSON.stringify(diagnostics, null, 2));
+    console.error(`Artifacts: ${artifacts}\nIsolated fixture: ${fixture.scratch}`);
     throw error;
   } finally {
     if (browser) await browser.close();

@@ -4,7 +4,8 @@ const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
 
 function createFixtures() {
-  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "forkdeck-ui-")));
+  // Native realpath expands Windows RUNNER~1-style temp paths to Git's spelling.
+  const scratch = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "forkdeck-ui-")));
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
     if (key.startsWith("GIT_") || key.startsWith("FORKDECK_") || ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "ELECTRON_RUN_AS_NODE"].includes(key)) delete env[key];
@@ -88,7 +89,8 @@ process.on('SIGTERM',()=>{server.close(()=>process.exit(0));server.closeAllConne
         if (match) done(null, `http://127.0.0.1:${match[1]}`);
       });
     });
-    return { origin, async close() { if (child.exitCode === null && child.signalCode === null) child.kill(); await exit; } };
+    return { origin, diagnostics() { return { stderr: stderr.slice(-65536), exitCode: child.exitCode, signal: child.signalCode }; },
+      async close() { if (child.exitCode === null && child.signalCode === null) child.kill(); await exit; } };
   } catch (error) {
     child.kill();
     await exit;

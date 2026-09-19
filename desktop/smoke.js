@@ -16,7 +16,7 @@ async function checkDesktop({ mainWindow, origin, rendererErrors, smoke, createW
   const expectedBrowserPath = smoke.phase === "restore" ? smoke.repository : smoke.scratch;
   const unauthorized = await fetch(`${origin}/api/profiles`);
   assert.equal(unauthorized.status, 401, "Other local callers must not reach the desktop API");
-  await waitFor(mainWindow, "document.querySelectorAll('[data-repo-path]').length >= 2 && document.querySelector('#branchButtonLabel')?.textContent === 'main' && typeof window.lucide?.createIcons === 'function'", "Repository tabs did not finish loading");
+  await waitFor(mainWindow, "document.body.dataset.ready === 'true' && document.querySelectorAll('[data-repo-path]').length >= 2 && document.querySelector('#branchButtonLabel')?.textContent === 'main' && typeof window.lucide?.createIcons === 'function'", "Repository tabs did not finish loading");
   const checks = await mainWindow.webContents.executeJavaScript(`(async () => {
     const existing = await fetch('/api/profiles').then(r => r.json());
     const id = existing.profiles.find(p => p.email === 'smoke@example.invalid')?.id;
@@ -75,7 +75,7 @@ async function checkDesktop({ mainWindow, origin, rendererErrors, smoke, createW
   await new Promise((resolve) => { mainWindow.once("closed", resolve); mainWindow.close(); });
   assert.equal(getWindow(), null);
   const reopened = await createWindow();
-  await waitFor(reopened, `localStorage.getItem('repoPath') === ${JSON.stringify(smoke.repository)} && document.querySelectorAll('[data-repo-path]').length >= 2`, "Reopened window did not restore the selected repository");
+  await waitFor(reopened, `document.body.dataset.ready === 'true' && localStorage.getItem('repoPath') === ${JSON.stringify(smoke.repository)} && document.querySelectorAll('[data-repo-path]').length >= 2`, "Reopened window did not restore the selected repository");
   const reopenedProfileStatus = await reopened.webContents.executeJavaScript("fetch('/api/profiles').then(r => r.status)");
   assert.equal(reopenedProfileStatus, 200);
 

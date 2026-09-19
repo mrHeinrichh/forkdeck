@@ -859,7 +859,7 @@ async function browsePath(path = state.browserPath) {
 }
 
 function openRepoDialog(mode = "local") {
-  if (!$("#actionDialog").hidden) return;
+  if (!$("#actionDialog").hidden || document.body.getAttribute("aria-busy") === "true") return;
   $("#repoDialog").hidden = false;
   setRepoDialogMode(mode);
   $("#chooseFolderButton").hidden = !window.forkdeckDesktop?.chooseDirectory;
@@ -2033,11 +2033,20 @@ function bindEvents() {
 
 async function boot() {
   bindEvents();
+  const shell = $(".shell");
+  shell.inert = true;
+  document.body.setAttribute("aria-busy", "true");
+  const ready = () => {
+    shell.inert = false;
+    document.body.removeAttribute("aria-busy");
+    document.body.dataset.ready = "true";
+  };
   if (location.protocol === "file:") {
     $("#fileModeBanner").hidden = false;
     state.activeIdentity = "Open localhost first";
     renderProfiles();
     showToast("Open http://localhost:4173 so Git actions can work.");
+    ready();
     iconRefresh();
     return;
   }
@@ -2051,6 +2060,8 @@ async function boot() {
     else clearRepoView();
   } catch (error) {
     showToast(error.message);
+  } finally {
+    ready();
   }
   iconRefresh();
 }

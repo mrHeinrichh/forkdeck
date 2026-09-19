@@ -44,7 +44,8 @@ async function main(argv = process.argv.slice(2)) {
     assert.ok(executable?.endsWith(".app"), "Pass a .app bundle for LaunchServices smoke");
   }
   const root = path.resolve(__dirname, "..");
-  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "forkdeck-smoke-")));
+  // Native realpath expands Windows RUNNER~1-style temp paths to Git's spelling.
+  const scratch = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "forkdeck-smoke-")));
   const repository = path.join(scratch, "repository with spaces");
   const otherRepository = path.join(scratch, "another repository");
   const userData = path.join(scratch, "user-data");
