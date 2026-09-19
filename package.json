@@ -1,6 +1,6 @@
 {
   "name": "forkdeck",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A visual local Git workspace for branches, commits, stash, diffs, and commit identities.",
   "main": "desktop/main.js",
   "scripts": {
@@ -10,9 +10,9 @@
     "start": "node server.js",
     "desktop": "electron .",
     "prepare": "node scripts/vendor.js",
-    "dist": "electron-builder --publish never",
-    "dist:mac": "electron-builder --mac --arm64 --x64 --publish never",
-    "dist:win": "electron-builder --win --x64 --publish never",
+    "dist": "node scripts/build-desktop.js",
+    "dist:mac": "node scripts/build-desktop.js --mac --arm64 --x64",
+    "dist:win": "node scripts/build-desktop.js --win --x64",
     "smoke:desktop": "node scripts/smoke-desktop.js"
   },
   "keywords": [
@@ -36,6 +36,7 @@
     "appId": "com.mrheinrichh.forkdeck",
     "productName": "ForkDeck",
     "asar": true,
+    "afterPack": "scripts/prepare-macos-sign.js",
     "npmRebuild": false,
     "directories": { "output": "dist", "buildResources": "build" },
     "files": [
@@ -51,6 +52,13 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.icns",
+      "identity": "-",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "strictVerify": true,
+      "notarize": false,
+      "timestamp": "none",
       "minimumSystemVersion": "13.0",
       "target": ["dmg", "zip"]
     },

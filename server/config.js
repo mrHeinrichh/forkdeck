@@ -6,9 +6,9 @@ const PORT = Number(process.env.PORT || 4173);
 const ROOT = os.homedir();
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 function defaultDataDir(platform = process.platform, env = process.env, home = os.homedir()) {
-  if (platform === "darwin") return path.join(home, "Library", "Application Support", "ForkDeck");
+  if (platform === "darwin") return path.posix.join(home, "Library", "Application Support", "ForkDeck");
   if (platform === "win32") return path.win32.join(env.APPDATA || path.win32.join(home, "AppData", "Roaming"), "ForkDeck");
-  return path.join(env.XDG_DATA_HOME || path.join(home, ".local", "share"), "ForkDeck");
+  return path.posix.join(env.XDG_DATA_HOME || path.posix.join(home, ".local", "share"), "ForkDeck");
 }
 
 const DATA_DIR = process.env.FORKDECK_DATA_DIR

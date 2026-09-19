@@ -8,7 +8,7 @@ ForkDeck is now a standalone desktop app for macOS and Windows, with its own bun
 
 Requires **macOS 13 or later** or **Windows 10/11 64-bit**. Install Git separately; GitHub CLI is optional for GitHub account detection and switching. Node.js is already included.
 
-This release is unsigned and has not been notarized. macOS Gatekeeper or Windows SmartScreen may require an explicit confirmation before it opens. Verify the download source and the SHA256SUMS.txt checksum before continuing.
+The macOS app is ad-hoc signed for bundle integrity but is not Apple notarized. The Windows installer is unsigned. macOS Gatekeeper or Windows SmartScreen may require an explicit confirmation before it opens. Verify the download source and the SHA256SUMS.txt checksum before continuing.
 
 Profiles and the repository list are stored per user, outside the installed app. Builds do not contain the developer's local profiles or repositories.
 

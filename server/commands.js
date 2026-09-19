@@ -15,8 +15,8 @@ function commandCandidates(command, platform = process.platform, env = process.e
       path.win32.join(home, "scoop", "apps", command, "current", ...(command === "git" ? ["cmd"] : ["bin"]), `${command}.exe`)
     ]);
   }
-  return ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", path.join(home, ".local", "bin")]
-    .map((directory) => path.join(directory, command));
+  return ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", path.posix.join(home, ".local", "bin")]
+    .map((directory) => path.posix.join(directory, command));
 }
 
 function resolveCommand(command) {
