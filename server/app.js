@@ -3,14 +3,16 @@ const { PORT } = require("./config");
 const { send } = require("./http");
 const { handleApi } = require("./routes/api");
 const { serveStatic } = require("./static");
+const { validateRequest, setSecurityHeaders } = require("./security");
 
 async function handleRequest(req, res) {
-  const url = new URL(req.url, "http://" + req.headers.host);
+  setSecurityHeaders(res);
   try {
+    const url = validateRequest(req);
     if (url.pathname.startsWith("/api/")) await handleApi(req, res, url);
     else await serveStatic(req, res, url);
   } catch (error) {
-    send(res, error.status || 500, { error: error.message || "Unexpected server error." });
+    if (!res.headersSent) send(res, error.status || 500, { error: error.message || "Unexpected server error." });
   }
 }
 
@@ -20,8 +22,8 @@ function createServer() {
 
 function startServer(port = PORT) {
   const server = createServer();
-  server.listen(port, () => {
-    console.log("ForkDeck running at http://localhost:" + port);
+  server.listen(port, "127.0.0.1", () => {
+    console.log("ForkDeck running at http://127.0.0.1:" + server.address().port);
   });
   return server;
 }

@@ -1,59 +1,63 @@
 # ForkDeck
 
-ForkDeck is a local visual Git workspace for switching commit identities, opening repositories, inspecting history, resolving conflicts, and managing stash entries from its own graph-first interface.
+A local visual Git workspace for macOS and Windows. Explore commit history, work with branches and stash entries, review diffs, and switch commit identities.
 
-## Run Locally
+## Download
+
+Visit the [download website](https://forkdeck.vercel.app), or download installers from [GitHub Releases](https://github.com/mrHeinrichh/forkdeck/releases/latest). Each release includes SHA-256 checksums.
+
+| Platform | Installer | Requirements |
+| --- | --- | --- |
+| macOS Apple Silicon | ARM64 `.dmg` or `.zip` | macOS 13 Ventura or newer |
+| macOS Intel | x64 `.dmg` or `.zip` | macOS 13 Ventura or newer |
+| Windows | x64 `.exe` installer | Windows 10 or 11, Intel/AMD 64-bit |
+
+Install [Git](https://git-scm.com/downloads) before opening a repository. [GitHub CLI](https://cli.github.com/) is optional; it is required for the GitHub authentication repair feature. The desktop app includes its own Node.js runtime. Windows on ARM is not a native target of this release.
+
+On macOS, open the disk image and drag ForkDeck to Applications. On Windows, run the installer. These community builds are not Apple notarized or signed with a Windows publisher certificate. The operating system may require approval for an unknown developer. Only approve a release you trust, and verify its checksum when needed.
+
+## Develop
+
+Use Node.js 22 or newer:
+
+```sh
+npm ci
+npm run desktop
+```
+
+To use the browser version:
 
 ```sh
 npm start
 ```
 
-Open `http://localhost:4173`.
+Open `http://127.0.0.1:4173`. Git operations run locally. Repository paths and profiles are kept in your operating system's application-data folder, outside the install directory. `FORKDECK_DATA_DIR` can override that location for isolated development or tests. Existing data from the old `data/*.json` launcher is not uploaded or included in installers.
 
-## macOS Desktop Launcher
-
-Create a clickable `ForkDeck.app` on your Desktop:
+## Validate and package
 
 ```sh
-chmod +x scripts/install-macos-app.sh
-./scripts/install-macos-app.sh
+npm run check
+npm test
+npm run dist:mac
 ```
 
-After that, double-click `ForkDeck.app` to start the local server and open ForkDeck in your browser.
+Windows installers are built on Windows with `npm run dist:win`. macOS installers are built on macOS. The GitHub Actions release workflow builds on native macOS and Windows runners, runs checks, and publishes installers with `SHA256SUMS.txt` after every platform succeeds. Push a version tag matching `package.json` (for example, `v1.1.0`) to publish a release.
 
-## GitHub Auth Repair
+## GitHub authentication repair
 
-If a push fails with a message like `Permission denied to another-account`, use the `Fix Auth` button beside Push.
+If a push reports access denied for the wrong GitHub account, the **Fix Auth** action checks your active GitHub CLI account and HTTPS credential helper. With an existing authenticated account, it can run `gh auth switch` and `gh auth setup-git`. Commit profiles change the repository's `user.name` and `user.email`; they do not independently grant remote access.
 
-ForkDeck checks the active GitHub CLI account, the Git HTTPS credential user, and the GitHub credential helper. The repair action runs:
+## Project layout
 
-```sh
-gh auth switch --hostname github.com --user <github-user>
-gh auth setup-git --hostname github.com
-```
+- `desktop/`: desktop window, native folder picker, and lifecycle management.
+- `server/`: local HTTP API, Git commands, storage, and repository services.
+- `public/`: the Git workspace interface and bundled UI assets.
+- `website/`: the public download website, deployable to Vercel as static files.
+- `.github/workflows/`: cross-platform validation and release packaging.
+- `tests/`: local API and portability checks.
 
-This fixes push authentication. Commit identity switching still uses Git's `user.name` and `user.email`.
+The download website can be deployed from `website/` with the Vercel CLI. Installers are served by GitHub Releases, so Vercel does not host the desktop application or access local repositories.
 
 ## License
 
-ForkDeck is open source under the MIT License.
-
-## Project Shape
-
-- `server/` contains the local Node server, API routes, Git commands, storage helpers, and response utilities.
-- `public/src/` contains the browser app modules.
-- `public/src/core/store.js` owns shared UI state.
-- `public/src/services/api.js` wraps API requests.
-- `public/src/ui/` contains UI helpers and dialog logic.
-- `public/src/git/` contains graph constants and Git view helpers.
-- `data/*.json` stores local machine profiles and repo paths, and stays ignored by Git.
-
-## Demonstration Branch Strategy
-
-This repository uses a simple feature-branch flow:
-
-1. Start from `main`.
-2. Create a focused branch like `feature/server-modules`.
-3. Commit one focused change at a time.
-4. Merge back to `main` with `--no-ff` so the Git graph keeps the branch shape.
-5. Push `main` and feature branches so the remote history shows the strategy.
+[MIT](LICENSE).

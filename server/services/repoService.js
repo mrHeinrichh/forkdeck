@@ -3,6 +3,7 @@ const { ROOT } = require("../config");
 const { git, repoRoot } = require("../git");
 const { ensureRepos, saveRepos } = require("../storage");
 const { parseStatus, parseBranches, parseRemoteBranches, parseCommits, parseStashes } = require("../parsers");
+const { toolStatus } = require("../commands");
 
 async function readGlobalIdentity() {
   const [name, email] = await Promise.all([
@@ -13,8 +14,10 @@ async function readGlobalIdentity() {
 }
 
 async function appStatus() {
+  const [gitTool, ghTool] = await Promise.all([toolStatus("git"), toolStatus("gh")]);
   return {
-    global: await readGlobalIdentity(),
+    global: gitTool.available ? await readGlobalIdentity() : { name: "", email: "" },
+    tools: { git: gitTool, gh: ghTool },
     command: "git config --global user.name / user.email"
   };
 }
@@ -22,7 +25,7 @@ async function appStatus() {
 async function repoSnapshot(repoPath) {
   const root = await repoRoot(repoPath);
   const [statusRaw, branchesRaw, remoteBranchesRaw, commitsRaw, stashesRaw, remote] = await Promise.all([
-    git(["-C", root, "status", "--porcelain=v1", "-b"]),
+    git(["-C", root, "status", "--porcelain=v1", "-b", "-z"]),
     git(["-C", root, "branch", "--format=%(refname:short)%09%(HEAD)%09%(upstream:short)"], ROOT, true),
     git(["-C", root, "branch", "-r", "--format=%(refname:short)"], ROOT, true),
     git(["-C", root, "log", "--all", "--topo-order", "--date=relative", "--pretty=format:%H%x09%h%x09%P%x09%an%x09%ar%x09%ct%x09%s%x09%D", "-n", "120"], ROOT, true),

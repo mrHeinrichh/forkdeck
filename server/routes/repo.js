@@ -1,5 +1,6 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const os = require("node:os");
 const { ROOT } = require("../config");
 const { send, readBody } = require("../http");
 const { git, repoRoot, repoFilePath } = require("../git");
@@ -9,7 +10,7 @@ const { repoSnapshot, rememberRepo } = require("../services/repoService");
 
 async function handleRepo(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/fs") {
-    const requested = path.resolve(String(url.searchParams.get("path") || process.env.HOME || "/Users/heinric"));
+    const requested = path.resolve(String(url.searchParams.get("path") || os.homedir()));
     const entries = await fs.readdir(requested, { withFileTypes: true });
     const directories = entries
       .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
@@ -94,7 +95,7 @@ async function handleRepo(req, res, url) {
     const hash = String(url.searchParams.get("hash") || "");
     if (!/^[0-9a-f]{7,40}$/i.test(hash)) return send(res, 400, { error: "Valid commit hash is required." });
     const patch = await git(["-C", root, "show", "--stat", "--patch", "--date=relative", "--format=fuller", "--no-ext-diff", hash], ROOT, true);
-    const files = parseCommitFiles(await git(["-C", root, "show", "--name-status", "--format=", hash], ROOT, true));
+    const files = parseCommitFiles(await git(["-C", root, "show", "--name-status", "-z", "--format=", hash], ROOT, true));
     return send(res, 200, { hash, files, patch: patch || "No commit details available." });
   }
 
@@ -102,7 +103,7 @@ async function handleRepo(req, res, url) {
     const root = await repoRoot(url.searchParams.get("path"));
     const hash = String(url.searchParams.get("hash") || "");
     if (!/^[0-9a-f]{7,40}$/i.test(hash)) return send(res, 400, { error: "Valid commit hash is required." });
-    const files = parseCommitFiles(await git(["-C", root, "show", "--name-status", "--format=", hash], ROOT, true));
+    const files = parseCommitFiles(await git(["-C", root, "show", "--name-status", "-z", "--format=", hash], ROOT, true));
     return send(res, 200, { hash, files });
   }
 
@@ -202,11 +203,12 @@ async function handleRepo(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/repo/clone") {
     const body = await readBody(req);
     const remote = String(body.remote || "").trim();
-    const destination = path.resolve(String(body.destination || ""));
+    const destinationInput = String(body.destination || "").trim();
+    const destination = path.resolve(destinationInput);
     if (!/^https:\/\/github\.com\/[^/]+\/[^/]+(\.git)?$/i.test(remote)) {
       return send(res, 400, { error: "Use a GitHub HTTPS repository URL." });
     }
-    if (!destination || destination === "/") return send(res, 400, { error: "Choose a valid destination folder." });
+    if (!destinationInput || destination === path.parse(destination).root) return send(res, 400, { error: "Choose a valid destination folder." });
     await git(["clone", remote, destination]);
     const { store, record } = await rememberRepo(destination);
     return send(res, 200, { repo: await repoSnapshot(record.root), repos: store.repos });

@@ -1,12 +1,19 @@
 {
   "name": "forkdeck",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A visual local Git workspace for branches, commits, stash, diffs, and commit identities.",
-  "main": "server.js",
+  "main": "desktop/main.js",
   "scripts": {
     "dev": "node server.js",
-    "check": "node --check server.js && find server public/src -name '*.js' -print0 | xargs -0 -n 1 node --check",
-    "start": "node server.js"
+    "check": "node scripts/check.js",
+    "test": "node --test",
+    "start": "node server.js",
+    "desktop": "electron .",
+    "prepare": "node scripts/vendor.js",
+    "dist": "electron-builder --publish never",
+    "dist:mac": "electron-builder --mac --arm64 --x64 --publish never",
+    "dist:win": "electron-builder --win --x64 --publish never",
+    "smoke:desktop": "node scripts/smoke-desktop.js"
   },
   "keywords": [
     "git",
@@ -14,6 +21,52 @@
     "identity",
     "commits"
   ],
-  "author": "",
-  "license": "MIT"
+  "author": "Heinrich",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mrHeinrichh/forkdeck.git"
+  },
+  "devDependencies": {
+    "electron": "44.4.3",
+    "electron-builder": "26.15.3",
+    "lucide": "1.47.0"
+  },
+  "build": {
+    "appId": "com.mrheinrichh.forkdeck",
+    "productName": "ForkDeck",
+    "asar": true,
+    "npmRebuild": false,
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": [
+      "desktop/**/*",
+      "server/**/*",
+      "public/**/*",
+      "package.json",
+      "LICENSE",
+      "!**/*.map",
+      "!**/.DS_Store"
+    ],
+    "artifactName": "ForkDeck-${version}-${os}-${arch}.${ext}",
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns",
+      "minimumSystemVersion": "13.0",
+      "target": ["dmg", "zip"]
+    },
+    "dmg": { "title": "ForkDeck ${version}" },
+    "win": {
+      "icon": "build/icon.png",
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ForkDeck"
+    },
+    "publish": null
+  }
 }

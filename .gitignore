@@ -5,3 +5,12 @@ npm-debug.log*
 # ForkDeck stores local machine paths and commit profiles here.
 data/*.json
 
+
+# Desktop packages, local previews, and deployment metadata.
+dist/
+release/
+output/
+.playwright-cli/
+.vercel/
+.sites-runtime/
+*.log

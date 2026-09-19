@@ -10,11 +10,16 @@
     <link rel="apple-touch-icon" href="/favicon.png?v=3" />
     <meta name="theme-color" content="#101515" />
     <link rel="stylesheet" href="/styles.css" />
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+    <script src="/vendor/lucide.min.js" defer></script>
     <script type="module" src="/src/main.js"></script>
   </head>
   <body>
     <main class="shell">
+      <div id="prerequisiteBanner" class="file-banner" hidden>
+        <i data-lucide="info"></i>
+        <span id="prerequisiteMessage"></span>
+        <a id="prerequisiteLink" href="https://git-scm.com/downloads" target="_blank" rel="noopener noreferrer">Get Git</a>
+      </div>
       <div id="fileModeBanner" class="file-banner" hidden>
         <i data-lucide="alert-circle"></i>
         <span>This app needs the local server for Git actions.</span>
@@ -293,20 +298,21 @@
           </div>
 
           <div id="localRepoDialogPanel" class="dialog-panel">
-            <label>Selected folder<input id="localPathInput" placeholder="/Users/heinric/project" /></label>
+            <label>Selected folder<input id="localPathInput" placeholder="Choose a repository folder" /></label>
             <button id="addRepoButton" type="button" class="accent"><i data-lucide="folder-plus"></i>Add selected repository</button>
           </div>
 
           <div id="cloneRepoDialogPanel" class="dialog-panel" hidden>
             <label>Clone URL<input id="cloneUrl" placeholder="https://github.com/user/repo.git" /></label>
-            <label>Destination<input id="cloneDestination" placeholder="/Users/heinric/repo-name" /></label>
+            <label>Destination<input id="cloneDestination" placeholder="Choose a new destination folder" /></label>
             <button id="cloneRepoButton" type="button" class="accent"><i data-lucide="download"></i>Clone repository</button>
           </div>
 
           <div class="browser-block">
+            <button id="chooseFolderButton" type="button" class="tool-button" hidden><i data-lucide="folder-open"></i>Choose folder…</button>
             <div class="browser-toolbar">
               <button id="pathUpButton" class="tool-button" type="button"><i data-lucide="corner-up-left"></i>Up</button>
-              <code id="pathBrowserCurrent">/Users/heinric</code>
+              <code id="pathBrowserCurrent">Home folder</code>
             </div>
             <div id="pathBrowserList" class="path-browser"></div>
           </div>

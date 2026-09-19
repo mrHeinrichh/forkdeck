@@ -2,6 +2,7 @@ const { execFile, spawn } = require("node:child_process");
 const { promisify } = require("node:util");
 const { ROOT } = require("../config");
 const { git, repoRoot } = require("../git");
+const { resolveCommand, commandOptions, commandError, toolStatus } = require("../commands");
 
 const execFileAsync = promisify(execFile);
 
@@ -26,20 +27,17 @@ function parseGitHubRemote(remote) {
 
 async function runCli(command, args, allowFailure = false) {
   try {
-    const { stdout, stderr } = await execFileAsync(command, args, { cwd: ROOT, maxBuffer: 10 * 1024 * 1024 });
+    const { stdout, stderr } = await execFileAsync(resolveCommand(command), args, commandOptions(ROOT));
     return `${stdout || ""}${stderr || ""}`.trimEnd();
   } catch (error) {
     if (allowFailure) return `${error.stdout || ""}${error.stderr || error.message || ""}`.trimEnd();
-    const message = error.stderr || error.stdout || error.message;
-    const wrapped = new Error(String(message).trim());
-    wrapped.status = 400;
-    throw wrapped;
+    throw commandError(command, error);
   }
 }
 
 function runWithInput(command, args, input, allowFailure = false) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(resolveCommand(command), args, { ...commandOptions(ROOT), stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => {
@@ -50,7 +48,7 @@ function runWithInput(command, args, input, allowFailure = false) {
     });
     child.on("error", (error) => {
       if (allowFailure) resolve(String(error.message || ""));
-      else reject(error);
+      else reject(commandError(command, error));
     });
     child.on("close", (code) => {
       const output = `${stdout || ""}${stderr || ""}`.trimEnd();
@@ -59,6 +57,7 @@ function runWithInput(command, args, input, allowFailure = false) {
       error.status = 400;
       reject(error);
     });
+    child.stdin.on("error", () => {}); // The executable can fail before consuming input.
     child.stdin.end(input);
   });
 }
@@ -67,7 +66,7 @@ function parseGhAuthStatus(raw) {
   const accounts = [];
   let activeAccount = null;
 
-  for (const line of String(raw || "").split("\n")) {
+  for (const line of String(raw || "").split(/\r?\n/)) {
     const accountMatch = line.match(/Logged in to ([^ ]+) account ([^ ]+)/);
     if (accountMatch) {
       activeAccount = {
@@ -95,7 +94,7 @@ function parseGhAuthStatus(raw) {
 
 function parseCredential(raw) {
   const fields = {};
-  for (const line of String(raw || "").split("\n")) {
+  for (const line of String(raw || "").split(/\r?\n/)) {
     const index = line.indexOf("=");
     if (index === -1) continue;
     fields[line.slice(0, index)] = line.slice(index + 1);
@@ -143,14 +142,15 @@ async function readCredentialHelpers() {
 async function readGitHubAuth({ path = "" } = {}) {
   const { root, remote } = await readRepoRemote(path);
   const remoteInfo = parseGitHubRemote(remote);
-  const [authRaw, credential, helpers] = await Promise.all([
+  const [authRaw, credential, helpers, ghTool] = await Promise.all([
     runCli("gh", ["auth", "status"], true),
     readCredential(remoteInfo),
-    readCredentialHelpers()
+    readCredentialHelpers(),
+    toolStatus("gh")
   ]);
   return {
     repo: { root, remote, github: remoteInfo },
-    gh: parseGhAuthStatus(authRaw),
+    gh: { ...parseGhAuthStatus(authRaw), installed: ghTool.available, error: ghTool.error || "" },
     credential,
     helpers
   };
@@ -182,4 +182,4 @@ async function fixGitHubAuth({ path = "", user = "" } = {}) {
   };
 }
 
-module.exports = { readGitHubAuth, fixGitHubAuth, parseGitHubRemote };
+module.exports = { readGitHubAuth, fixGitHubAuth, parseGitHubRemote, parseGhAuthStatus, parseCredential };

@@ -51,6 +51,10 @@ button {
   width: 100%;
 }
 
+.shell:has(> .file-banner:not([hidden])) {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
 .file-banner {
   display: flex;
   align-items: center;

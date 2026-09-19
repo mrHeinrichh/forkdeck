@@ -582,6 +582,17 @@ async function loadProfiles() {
 async function loadStatus() {
   const status = await request("/api/status");
   state.activeIdentity = identityText(status.global);
+  const banner = $("#prerequisiteBanner");
+  if (banner) {
+    const gitMissing = status.tools?.git?.available === false;
+    const ghMissing = status.tools?.gh?.available === false;
+    banner.hidden = !gitMissing && !ghMissing;
+    $("#prerequisiteMessage").textContent = gitMissing
+      ? "Install Git to open repositories, then restart ForkDeck."
+      : "GitHub CLI is optional. Install it to switch GitHub push accounts, then restart ForkDeck.";
+    $("#prerequisiteLink").href = gitMissing ? "https://git-scm.com/downloads" : "https://cli.github.com/";
+    $("#prerequisiteLink").textContent = gitMissing ? "Get Git" : "Get GitHub CLI";
+  }
   renderProfiles();
 }
 
@@ -808,6 +819,7 @@ async function openRepo(path = state.repoPath) {
 async function browsePath(path = state.browserPath) {
   const payload = await request(`/api/fs?path=${encodeURIComponent(path)}`);
   state.browserPath = payload.path;
+  state.browserParent = payload.parent;
   localStorage.setItem("browserPath", payload.path);
   $("#pathBrowserCurrent").textContent = payload.path;
   if (state.browserTarget === "local") $("#localPathInput").value = payload.path;
@@ -815,7 +827,7 @@ async function browsePath(path = state.browserPath) {
   $("#pathBrowserList").innerHTML = `
     <button class="path-row ${payload.isGitRepo ? "is-git" : ""}" data-select-path="${escapeHtml(payload.path)}">
       <i data-lucide="${payload.isGitRepo ? "folder-git-2" : "folder"}"></i>
-      <span>${escapeHtml(payload.path.split("/").filter(Boolean).pop() || payload.path)}</span>
+      <span>${escapeHtml(payload.path.split(/[\\/]/).filter(Boolean).pop() || payload.path)}</span>
       <small>${payload.isGitRepo ? "Git repo" : "Current folder"}</small>
     </button>
     ${payload.directories.map((entry) => `
@@ -831,7 +843,8 @@ async function browsePath(path = state.browserPath) {
 function openRepoDialog(mode = "local") {
   $("#repoDialog").hidden = false;
   setRepoDialogMode(mode);
-  browsePath(state.browserPath).catch((error) => showToast(error.message));
+  $("#chooseFolderButton").hidden = !window.forkdeckDesktop?.chooseDirectory;
+  browsePath(state.browserPath).catch(() => browsePath("")).catch((error) => showToast(error.message));
 }
 
 function setRepoDialogMode(mode) {
@@ -847,7 +860,7 @@ function renderRepo() {
   const repo = state.repo;
   if (!repo) return;
 
-  $("#repoName").textContent = repo.root.split("/").filter(Boolean).pop() || repo.root;
+  $("#repoName").textContent = repo.root.split(/[\\/]/).filter(Boolean).pop() || repo.root;
   $("#repoRemote").textContent = repo.remote || repo.root;
   $("#branchPill").textContent = repo.branch;
   $("#branchButtonLabel").textContent = repo.branch || "No branch";
@@ -1740,9 +1753,13 @@ function bindEvents() {
   $("#addRepoButton").addEventListener("click", () => addRepo().catch((error) => showToast(error.message)));
   $("#cloneRepoButton").addEventListener("click", () => cloneRepo().catch((error) => showToast(error.message)));
   $("#pathUpButton").addEventListener("click", () => {
-    const current = $("#pathBrowserCurrent").textContent;
-    const parent = current.split("/").slice(0, -1).join("/") || "/";
-    browsePath(parent).catch((error) => showToast(error.message));
+    browsePath(state.browserParent).catch((error) => showToast(error.message));
+  });
+  $("#chooseFolderButton").addEventListener("click", async () => {
+    try {
+      const selected = await window.forkdeckDesktop?.chooseDirectory();
+      if (selected) await browsePath(selected);
+    } catch (error) { showToast(error.message); }
   });
   $("#fetchButton").addEventListener("click", () => runRepoAction("fetch").catch((error) => showToast(error.message)));
   $("#pullButton").addEventListener("click", () => runRepoAction("pull").catch((error) => showToast(error.message)));
