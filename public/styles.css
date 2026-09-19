@@ -2505,3 +2505,24 @@ svg {
     min-height: 480px;
   }
 }
+
+/* Unavailable actions remain visibly distinct and cannot pretend to run. */
+button:disabled { opacity: .42; cursor: not-allowed; }
+@media (min-width: 921px) and (max-width: 1280px) {
+  .dashboard { grid-template-columns: 220px minmax(0, 1fr); }
+  .git-grid { grid-template-columns: minmax(0, 1fr) 245px; }
+  .toolbar-actions { flex-wrap: wrap; }
+}
+.stash-create { flex-wrap: wrap; }
+.stash-create > input { flex: 1 1 180px; min-width: 0; }
+@media (min-width: 921px) and (max-width: 1280px) {
+  .commit-graph { --branch-rail-width: 170px; }
+  .branch-rail-pill { max-width: 150px; }
+}
+
+.repo-header > div:first-child { min-width: 0; flex: 1; }
+.repo-shell { grid-template-columns: minmax(0, 1fr); }
+.repo-stats { flex: 0 1 auto; max-width: 50%; }
+.list, .commit-file-list { grid-template-columns: minmax(0, 1fr); }
+.file-row, .commit-file-row { min-width: 0; max-width: 100%; }
+.file-row small, .commit-file-row small { flex-shrink: 0; }

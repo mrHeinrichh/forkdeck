@@ -1,4 +1,49 @@
 export function createActionDialog({ state, $, iconRefresh, escapeHtml, showToast }) {
+const dialogElement = $("#actionDialog");
+const document = dialogElement.ownerDocument;
+let backgroundState = null;
+let previousFocus = null;
+
+function isolateDialog() {
+  if (backgroundState) return;
+  previousFocus = document.activeElement;
+  const background = [...dialogElement.parentElement.children, $("#commitContextMenu")]
+    .filter((element) => element && element !== dialogElement);
+  backgroundState = new Map(background.map((element) => [element, element.inert]));
+  for (const element of backgroundState.keys()) element.inert = true;
+}
+
+function focusDialog(mode, hasInput) {
+  const panel = $("#actionDialogPanel");
+  panel.setAttribute("tabindex", "-1");
+  if (mode === "running") panel.focus();
+  else if (hasInput) {
+    $("#actionDialogInput").focus();
+    $("#actionDialogInput").select();
+  } else if (mode === "confirm") $("#actionDialogCancel").focus();
+  else $("#actionDialogConfirm").focus();
+}
+
+dialogElement.addEventListener("keydown", (event) => {
+  if (event.key !== "Tab" || dialogElement.hidden) return;
+  const focusable = [...dialogElement.querySelectorAll('button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')]
+    .filter((element) => !element.closest("[hidden]") && element.getClientRects().length);
+  if (!focusable.length) {
+    event.preventDefault();
+    $("#actionDialogPanel").focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || !focusable.includes(document.activeElement))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || !focusable.includes(document.activeElement))) {
+    event.preventDefault();
+    first.focus();
+  }
+});
+
 function setActionDialog(options = {}) {
   const mode = options.mode || "confirm";
   const dialog = $("#actionDialog");
@@ -11,6 +56,7 @@ function setActionDialog(options = {}) {
   const confirm = $("#actionDialogConfirm");
 
   clearTimeout(state.actionDialogAutoClose);
+  isolateDialog();
   dialog.dataset.mode = mode;
   dialog.dataset.input = options.input ? "true" : "false";
   dialog.hidden = false;
@@ -27,24 +73,28 @@ function setActionDialog(options = {}) {
     $("#actionDialogInputLabel").textContent = options.inputLabel || "Name";
     input.value = options.inputValue || "";
     input.placeholder = options.inputPlaceholder || "";
-    setTimeout(() => {
-      input.focus();
-      input.select();
-    }, 0);
   }
   output.hidden = !options.output;
   output.textContent = options.output || "";
   cancel.hidden = mode !== "confirm";
   confirm.disabled = mode === "running";
+  $("#actionDialogClose").disabled = mode === "running";
   confirm.textContent = mode === "confirm" ? (options.confirmLabel || "Run") : mode === "running" ? "Running..." : "Close";
   confirm.classList.toggle("is-danger-action", Boolean(options.danger));
   confirm.classList.toggle("accent", !options.danger);
   iconRefresh();
+  focusDialog(mode, Boolean(options.input));
 }
 
 function closeActionDialog(result = false) {
   clearTimeout(state.actionDialogAutoClose);
   $("#actionDialog").hidden = true;
+  if (backgroundState) {
+    for (const [element, inert] of backgroundState) element.inert = inert;
+    backgroundState = null;
+  }
+  if (previousFocus?.isConnected && !previousFocus.closest("[hidden], [inert]")) previousFocus.focus();
+  previousFocus = null;
   const resolver = state.actionDialogResolve;
   state.actionDialogResolve = null;
   if (resolver) resolver(result);
@@ -85,7 +135,9 @@ function cancelActionDialog() {
 }
 
 async function runActionDialog(options) {
+  if (state.repoActionInFlight) return null;
   state.repoActionInFlight = true;
+  state.repoMutationVersion = (state.repoMutationVersion || 0) + 1;
   setActionDialog({
     mode: "running",
     eyebrow: options.eyebrow || "Git Action",
@@ -120,6 +172,7 @@ async function runActionDialog(options) {
     showToast(error.message);
     return null;
   } finally {
+    state.repoMutationVersion = (state.repoMutationVersion || 0) + 1;
     state.repoActionInFlight = false;
   }
 }

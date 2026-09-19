@@ -12,6 +12,23 @@ const form = $("#profileForm");
 const toast = $("#toast");
 const commitContextMenu = $("#commitContextMenu");
 let contextMenuScrollGuardUntil = 0;
+let repoOpenVersion = 0;
+let inspectorVersion = 0;
+let browserVersion = 0;
+
+function savePreference(key, value) {
+  if (value) localStorage.setItem(key, value);
+  else localStorage.removeItem(key);
+  window.forkdeckDesktop?.setPreferences?.({ [key]: value }).catch((error) => showToast(error.message));
+}
+
+async function restorePreferences() {
+  if (!window.forkdeckDesktop?.getPreferences) return;
+  const saved = await window.forkdeckDesktop.getPreferences();
+  for (const key of ["repoPath", "browserPath"]) {
+    if (typeof saved[key] === "string") state[key] = saved[key];
+  }
+}
 
 function showToast(message, tone = "") {
   toast.textContent = message;
@@ -49,6 +66,8 @@ function repoSignature(repo) {
   if (!repo) return "";
   return JSON.stringify({
     root: repo.root,
+    identity: repo.identity,
+    remote: repo.remote,
     branch: repo.branch,
     ahead: repo.ahead,
     behind: repo.behind,
@@ -75,15 +94,21 @@ function renderRepoPreservingGraph() {
 }
 
 function applyRepoSnapshot(repo, { source = "manual", preserveGraph = true } = {}) {
+  if (source === "action") { repoOpenVersion++; inspectorVersion++; }
   const previous = state.repo;
   const previousSignature = repoSignature(previous);
   const nextSignature = repoSignature(repo);
   const previousHead = previous?.commits?.[0]?.hash || "";
   const nextHead = repo?.commits?.[0]?.hash || "";
 
-  store.patch({ repo, repoPath: repo.root, lastRepoSignature: nextSignature });
+  store.patch({ repo, repoPath: repo.root, activeIdentity: identityText(repo.identity), lastRepoSignature: nextSignature });
+  renderProfiles();
+  if (state.selectedFile && !repo.files.some((file) => file.file === state.selectedFile)) {
+    state.selectedFile = "";
+    state.inspectorOpen = false;
+  }
 
-  if (previousSignature && previousSignature === nextSignature) {
+  if (source === "poll" && previousSignature && previousSignature === nextSignature) {
     setLiveSyncStatus("Live local sync", "idle");
     return false;
   }
@@ -255,7 +280,7 @@ function remoteGitHubOwner(remote = state.repo?.remote) {
 }
 
 function preferredGitHubUser() {
-  return String(selectedProfile()?.github || remoteGitHubOwner() || "").trim().replace(/^@/, "");
+  return String(state.profiles.find((profile) => identityText(profile) === state.activeIdentity)?.github || "").trim().replace(/^@/, "");
 }
 
 function formatGitHubAuthStatus(payload, targetUser) {
@@ -293,26 +318,15 @@ function formatGitHubAuthStatus(payload, targetUser) {
 function contextMenuItems(commit) {
   const branchRef = commitBranchRef(commit);
   return [
-    { id: "merge", label: "Merge", icon: "git-merge" },
-    { id: "rebase", label: "Rebase", icon: "git-compare-arrows" },
-    { id: "checkout", label: "Checkout", icon: "git-branch", detail: branchRef?.clean || "No branch ref" },
-    { id: "worktree", label: "Create worktree from here", icon: "folder-plus" },
+    { id: "checkout", label: "Checkout", icon: "git-branch", disabled: !branchRef, detail: branchRef?.clean || "No branch ref" },
     { id: "branch", label: "Create branch here", icon: "git-branch-plus" },
-    { id: "cherry-pick", label: "Cherry pick", icon: "cherry" },
-    { id: "reset", label: "Reset", icon: "rotate-ccw", danger: true },
-    { id: "revert", label: "Revert", icon: "undo-2", danger: true },
-    { id: "explain", label: "Explain", icon: "sparkles" },
-    { id: "delete", label: "Delete", icon: "trash-2", danger: true },
+    { id: "explain", label: "View commit details", icon: "file-text" },
     { separator: true },
-    { id: "copy-branch", label: "Copy branch", icon: "copy" },
-    { id: "copy-commit", label: "Copy commit", icon: "copy" },
-    { id: "copy-link", label: "Copy link to this commit", icon: "link" },
-    { id: "patch", label: "Create patch from commit", icon: "file-code-2" },
-    { id: "cloud-patch", label: "Share commit as cloud patch", icon: "cloud-upload" },
+    { id: "copy-branch", label: "Copy branch", icon: "copy", disabled: !branchRef },
+    { id: "copy-commit", label: "Copy commit hash", icon: "copy" },
+    { id: "copy-link", label: "Copy link to this commit", icon: "link", disabled: !commitRemoteUrl(commit) },
+    { id: "patch", label: "Copy commit patch", icon: "file-code-2" },
     { separator: true },
-    { id: "pin", label: "Pin to left side", icon: "pin" },
-    { id: "solo", label: "Solo", icon: "focus" },
-    { id: "compare", label: "Compare commit", icon: "columns-2" },
     { id: "tag", label: "Create tag here", icon: "tag" },
     { id: "annotated-tag", label: "Create annotated tag here", icon: "badge-plus" }
   ];
@@ -358,7 +372,7 @@ function showCommitContextMenu(event, commit) {
     ${contextMenuItems(commit).map((item) => {
       if (item.separator) return `<div class="context-separator"></div>`;
       return `
-        <button class="context-menu-item ${item.danger ? "is-danger" : ""}" type="button" data-commit-action="${escapeHtml(item.id)}" data-commit-hash="${escapeHtml(commit.hash)}">
+        <button class="context-menu-item ${item.danger ? "is-danger" : ""}" type="button" ${item.disabled ? 'disabled title="Not available for this commit"' : ""} data-commit-action="${escapeHtml(item.id)}" data-commit-hash="${escapeHtml(commit.hash)}">
           <i data-lucide="${escapeHtml(item.icon)}"></i>
           <span>${escapeHtml(item.label)}</span>
           ${item.detail ? `<small>${escapeHtml(item.detail)}</small>` : ""}
@@ -378,6 +392,7 @@ function showCommitContextMenu(event, commit) {
 }
 
 async function createBranchAtCommit(commit) {
+  const path = state.repoPath;
   const name = await promptAction({
     eyebrow: "Branch",
     title: "Create branch here",
@@ -399,10 +414,10 @@ async function createBranchAtCommit(commit) {
     icon: "git-branch-plus",
     task: () => request("/api/repo/branch", {
       method: "POST",
-      body: JSON.stringify({ path: state.repoPath, name, startPoint: commit.hash })
+      body: JSON.stringify({ path, name, startPoint: commit.hash })
     })
   });
-  if (!repo) return;
+  if (!repo || state.repoPath !== path) return;
   state.selectedCommit = commit.hash;
   state.centerMode = "graph";
   state.inspectorOpen = false;
@@ -410,6 +425,7 @@ async function createBranchAtCommit(commit) {
 }
 
 async function createTagAtCommit(commit, annotated = false) {
+  const path = state.repoPath;
   const name = await promptAction({
     eyebrow: "Tag",
     title: annotated ? "Create annotated tag" : "Create tag",
@@ -442,10 +458,10 @@ async function createTagAtCommit(commit, annotated = false) {
     icon: annotated ? "badge-plus" : "tag",
     task: () => request("/api/repo/tag", {
       method: "POST",
-      body: JSON.stringify({ path: state.repoPath, hash: commit.hash, name, message, annotated })
+      body: JSON.stringify({ path, hash: commit.hash, name, message, annotated })
     })
   });
-  if (!repo) return;
+  if (!repo || state.repoPath !== path) return;
   applyRepoSnapshot(repo, { source: "action" });
 }
 
@@ -467,28 +483,14 @@ async function handleCommitContextAction(action, hash) {
   if (action === "annotated-tag") return createTagAtCommit(commit, true);
   if (action === "patch") {
     const payload = await request(`/api/repo/patch?path=${encodeURIComponent(state.repoPath)}&hash=${encodeURIComponent(commit.hash)}`);
-    return copyText(payload.patch, "Patch");
+    return copyText(payload.patch, payload.firstParent ? "Merge patch (against first parent)" : "Patch");
   }
   if (action === "checkout") {
     if (!branchRef) return showToast("This commit has no branch ref to checkout.");
-    if (branchRef.kind === "remote") return showToast("Remote branch checkout needs local tracking setup first.");
     return checkoutBranch(branchRef.clean);
   }
 
-  const guarded = {
-    merge: "Merge is shown here, but not run yet because it can rewrite your working tree.",
-    rebase: "Rebase is shown here, but not run yet because it rewrites history.",
-    worktree: "Worktree creation needs a destination picker before it can run.",
-    "cherry-pick": "Cherry pick is shown here, but not run yet because it modifies your working tree.",
-    reset: "Reset is disabled here so your files/history are not changed accidentally.",
-    revert: "Revert is shown here, but not run yet because it creates a new commit.",
-    delete: "Delete is disabled here so branches/tags are not removed accidentally.",
-    "cloud-patch": "Cloud patches need a sharing backend before this can upload anything.",
-    pin: "Pinned commit view is ready for a left-side pin panel next.",
-    solo: "Solo mode is ready for filtering the graph to this commit path next.",
-    compare: "Compare commit needs a second selected commit."
-  };
-  showToast(guarded[action] || "Action ready.");
+  showToast("This action is not available.");
 }
 
 function renderInspectorMode() {
@@ -512,7 +514,7 @@ function renderRightFileList() {
           <small>${escapeHtml(file.label)}</small>
         </button>
       `).join("")
-      : `<div class="empty compact-empty">Loading changed files for this commit.</div>`;
+      : `<div class="empty compact-empty">${state.commitFilesLoading ? "Loading changed files for this commit." : state.commitFilesError || "This commit has no changed files."}</div>`;
     return;
   }
 
@@ -538,18 +540,17 @@ function fillForm(profile = {}) {
 }
 
 function renderProfiles() {
+  const active = state.profiles.find((profile) => identityText(profile) === state.activeIdentity);
+  const label = active?.label || (state.repo?.identity?.name || (state.profiles.length ? "Choose identity" : "Add account"));
+  $("#accountButtonLabel").textContent = label;
+  $("#accountButton").title = `${state.repo ? "Repository" : "Default"} commit identity: ${state.activeIdentity || "Not set"}`;
+  $("#accountAvatar").textContent = active ? initials(active) : initials({ name: label });
+  $("#accountAvatar").style.setProperty("--profile-color", active?.color || "#64748b");
   if (!state.profiles.length) {
-    accountMenuProfiles.innerHTML = `<div class="empty compact-empty">No users yet.</div>`;
-    $("#accountButtonLabel").textContent = "Add account";
-    $("#accountAvatar").textContent = "?";
+    accountMenuProfiles.innerHTML = `<div class="empty compact-empty">No saved identities yet.</div>`;
     iconRefresh();
     return;
   }
-
-  const active = state.profiles.find((profile) => identityText({ name: profile.name, email: profile.email }) === state.activeIdentity) || selectedProfile() || state.profiles[0];
-  $("#accountButtonLabel").textContent = active.label;
-  $("#accountAvatar").textContent = initials(active);
-  $("#accountAvatar").style.setProperty("--profile-color", active.color);
 
   accountMenuProfiles.innerHTML = state.profiles
     .map((profile) => {
@@ -561,7 +562,7 @@ function renderProfiles() {
             <strong>${escapeHtml(profile.label)}</strong>
             <span>${profile.github ? `@${escapeHtml(profile.github)}` : "Git profile"} · ${escapeHtml(profile.name)}</span>
           </div>
-          <button class="quick-activate" title="Use identity" aria-label="Use identity" data-activate="${escapeHtml(profile.id)}">
+          <button class="quick-activate" title="Use identity" aria-label="Use identity" data-activate="${escapeHtml(profile.id)}" ${state.repo ? "" : "disabled"}>
             <i data-lucide="user-check"></i>
           </button>
         </article>
@@ -581,7 +582,8 @@ async function loadProfiles() {
 
 async function loadStatus() {
   const status = await request("/api/status");
-  state.activeIdentity = identityText(status.global);
+  state.globalIdentity = status.global;
+  state.activeIdentity = identityText(state.repo?.identity || status.global);
   const banner = $("#prerequisiteBanner");
   if (banner) {
     const gitMissing = status.tools?.git?.available === false;
@@ -618,14 +620,20 @@ async function saveCurrentProfile() {
 
 async function activateProfile(id = state.selectedId) {
   if (!id) return showToast("Pick an identity first.");
+  if (!state.repoPath) return showToast("Open a repository before applying an identity.");
+  const path = state.repoPath;
   const payload = await request("/api/switch", {
     method: "POST",
-    body: JSON.stringify({ profileId: id })
+    body: JSON.stringify({ profileId: id, path })
   });
-  state.activeIdentity = identityText(payload.status.global);
+  if (state.repoPath !== path) return;
+  state.repoMutationVersion++;
+  state.selectedId = id;
+  state.repo.identity = payload.identity;
+  state.activeIdentity = identityText(payload.identity);
   $("#accountMenu").hidden = true;
   renderProfiles();
-  showToast(`${payload.profile.label} is active for commits.`);
+  showToast(`${payload.profile.label} is active for this repository.`);
 }
 
 async function deleteCurrentProfile() {
@@ -679,6 +687,8 @@ function renderRepos() {
 }
 
 function clearRepoView() {
+  repoOpenVersion++;
+  inspectorVersion++;
   stopRepoLiveSync();
   state.repo = null;
   state.repoPath = "";
@@ -691,7 +701,9 @@ function clearRepoView() {
   state.lastRepoSignature = "";
   state.inspectorOpen = false;
   state.centerMode = "graph";
-  localStorage.removeItem("repoPath");
+  savePreference("repoPath", "");
+  state.activeIdentity = identityText(state.globalIdentity);
+  renderProfiles();
 
   $("#repoName").textContent = "Open a local repository";
   $("#repoRemote").textContent = "Use the plus tab to add or clone.";
@@ -787,7 +799,7 @@ async function cloneRepo() {
   state.inspectorOpen = false;
   state.centerMode = "graph";
   state.repoPath = payload.repo.root;
-  localStorage.setItem("repoPath", state.repoPath);
+  savePreference("repoPath", state.repoPath);
   $("#cloneUrl").value = "";
   $("#cloneDestination").value = "";
   $("#repoDialog").hidden = true;
@@ -798,7 +810,11 @@ async function cloneRepo() {
 
 async function openRepo(path = state.repoPath) {
   if (!path) return showToast("Paste a local repository path first.");
+  const version = ++repoOpenVersion;
+  const mutationVersion = state.repoMutationVersion;
+  inspectorVersion++;
   const repo = await request(`/api/repo?path=${encodeURIComponent(path)}`);
+  if (version !== repoOpenVersion || mutationVersion !== state.repoMutationVersion) return;
   stopRepoLiveSync();
   state.selectedFile = "";
   state.selectedCommit = repo.commits[0]?.hash || "";
@@ -808,19 +824,21 @@ async function openRepo(path = state.repoPath) {
   state.selectedCommitPatchHash = "";
   state.inspectorOpen = false;
   state.centerMode = "graph";
-  localStorage.setItem("repoPath", repo.root);
+  savePreference("repoPath", repo.root);
   await loadRepos();
+  if (version !== repoOpenVersion || mutationVersion !== state.repoMutationVersion) return;
   applyRepoSnapshot(repo, { source: "open", preserveGraph: false });
-  if (state.selectedCommit) await loadCommitDetails(state.selectedCommit, true, false);
   startRepoLiveSync();
   showToast("Repository opened.");
 }
 
 async function browsePath(path = state.browserPath) {
+  const version = ++browserVersion;
   const payload = await request(`/api/fs?path=${encodeURIComponent(path)}`);
+  if (version !== browserVersion) return;
   state.browserPath = payload.path;
   state.browserParent = payload.parent;
-  localStorage.setItem("browserPath", payload.path);
+  savePreference("browserPath", payload.path);
   $("#pathBrowserCurrent").textContent = payload.path;
   if (state.browserTarget === "local") $("#localPathInput").value = payload.path;
   else $("#cloneDestination").value = payload.path;
@@ -841,6 +859,7 @@ async function browsePath(path = state.browserPath) {
 }
 
 function openRepoDialog(mode = "local") {
+  if (!$("#actionDialog").hidden) return;
   $("#repoDialog").hidden = false;
   setRepoDialogMode(mode);
   $("#chooseFolderButton").hidden = !window.forkdeckDesktop?.chooseDirectory;
@@ -891,10 +910,10 @@ function renderRepo() {
 
   $("#remoteBranchList").innerHTML = repo.remoteBranches.length
     ? repo.remoteBranches.map((branch) => `
-      <div class="side-row">
+      <button class="side-row" data-checkout="${escapeHtml(branch)}">
         <i data-lucide="cloud"></i>
         <span>${escapeHtml(branch)}</span>
-      </div>
+      </button>
     `).join("")
     : `<div class="empty compact-empty">No remote branches.</div>`;
 
@@ -1105,6 +1124,7 @@ function stashRowMarkup(item, laneCount, sourceLane = 0, active = [], stashLaneS
         <span class="graph-inline-actions">
           <button type="button" data-stash-apply="${escapeHtml(stash.ref)}"><i data-lucide="copy-check"></i>Apply</button>
           <button type="button" data-stash-pop="${escapeHtml(stash.ref)}"><i data-lucide="archive-restore"></i>Pop</button>
+          <button type="button" data-stash-drop="${escapeHtml(stash.ref)}" class="danger-text"><i data-lucide="trash-2"></i>Drop</button>
         </span>
       </span>
     </article>
@@ -1268,11 +1288,28 @@ async function refreshRepo(options = {}) {
   const silent = options.silent ?? false;
   const source = options.source || "manual";
   if (!state.repoPath || state.repoRefreshInFlight || state.repoActionInFlight) return false;
+  const path = state.repoPath;
+  const version = repoOpenVersion;
+  const mutationVersion = state.repoMutationVersion;
   state.repoRefreshInFlight = true;
   if (!silent) setLiveSyncStatus("Syncing local repo...", "syncing");
   try {
-    const repo = await request(`/api/repo?path=${encodeURIComponent(state.repoPath)}`);
+    const repo = await request(`/api/repo?path=${encodeURIComponent(path)}`);
+    if (state.repoPath !== path || version !== repoOpenVersion || mutationVersion !== state.repoMutationVersion || state.repoActionInFlight) return false;
     const changed = applyRepoSnapshot(repo, { source, preserveGraph: source === "poll" });
+    if (state.centerMode === "worktree" && state.inspectorOpen && state.selectedFile) {
+      const file = state.selectedFile;
+      const selection = inspectorVersion;
+      if (!repo.files.some((item) => item.file === file)) {
+        inspectorVersion++;
+        state.selectedFile = "";
+        state.inspectorOpen = false;
+        renderRepo();
+      } else if (!repo.files.find((item) => item.file === file)?.label.toLowerCase().includes("conflict")) {
+        const payload = await request(`/api/repo/diff?path=${encodeURIComponent(path)}&file=${encodeURIComponent(file)}`);
+        if (selection === inspectorVersion && path === state.repoPath && state.selectedFile === file && state.centerMode === "worktree" && $("#commitPatch").textContent !== payload.diff) setDiff("#commitPatch", payload.diff);
+      }
+    }
     if (!changed && !silent) setLiveSyncStatus("Already up to date", "updated");
     return changed;
   } catch (error) {
@@ -1286,6 +1323,10 @@ async function refreshRepo(options = {}) {
 
 async function loadCommitDetails(hash, silent = false, openInspector = true) {
   if (!state.repoPath) return;
+  const version = ++inspectorVersion;
+  const path = state.repoPath;
+  state.commitFilesLoading = true;
+  state.commitFilesError = "";
   state.selectedCommit = hash;
   state.selectedCommitFile = "";
   state.selectedCommitFiles = [];
@@ -1304,7 +1345,19 @@ async function loadCommitDetails(hash, silent = false, openInspector = true) {
     renderInspectorMode();
   }
   const endpoint = openInspector ? "commit" : "commit-files";
-  const payload = await request(`/api/repo/${endpoint}?path=${encodeURIComponent(state.repoPath)}&hash=${encodeURIComponent(hash)}`);
+  let payload;
+  try {
+    payload = await request(`/api/repo/${endpoint}?path=${encodeURIComponent(path)}&hash=${encodeURIComponent(hash)}`);
+  } catch (error) {
+    if (version !== inspectorVersion || path !== state.repoPath) return;
+    state.commitFilesLoading = false;
+    state.commitFilesError = "Could not load changed files. Select the commit to retry.";
+    renderRightFileList();
+    if (openInspector) setDiff("#commitPatch", error.message);
+    throw error;
+  }
+  if (version !== inspectorVersion || path !== state.repoPath || state.centerMode !== "commit") return;
+  state.commitFilesLoading = false;
   state.selectedCommitFiles = payload.files || [];
   if (openInspector) {
     state.selectedCommitPatch = payload.patch || "";
@@ -1318,12 +1371,16 @@ async function loadCommitDetails(hash, silent = false, openInspector = true) {
 
 async function loadCommitFileDiff(file) {
   if (!state.repoPath || !state.selectedCommit) return;
+  const version = ++inspectorVersion;
+  const path = state.repoPath;
+  const hash = state.selectedCommit;
   state.selectedCommitFile = file;
   state.centerMode = "commit";
   state.inspectorOpen = true;
   renderRightFileList();
   renderCommitInspector("Loading file diff...");
-  const payload = await request(`/api/repo/commit-file?path=${encodeURIComponent(state.repoPath)}&hash=${encodeURIComponent(state.selectedCommit)}&file=${encodeURIComponent(file)}`);
+  const payload = await request(`/api/repo/commit-file?path=${encodeURIComponent(path)}&hash=${encodeURIComponent(hash)}&file=${encodeURIComponent(file)}`);
+  if (version !== inspectorVersion || path !== state.repoPath || state.centerMode !== "commit") return;
   $("#commitDetailTitle").textContent = file;
   setDiff("#commitPatch", payload.diff);
   $("#diffTitle").textContent = file;
@@ -1336,6 +1393,8 @@ async function loadDiff(file) {
   if (!state.repoPath) return;
   const status = state.repo?.files.find((item) => item.file === file)?.label || "Changed";
   if (String(status).toLowerCase().includes("conflict")) return loadConflict(file);
+  const version = ++inspectorVersion;
+  const path = state.repoPath;
   state.selectedFile = file;
   state.selectedCommitFile = "";
   state.centerMode = "worktree";
@@ -1352,11 +1411,14 @@ async function loadDiff(file) {
   renderInspectorMode();
   $("#diffTitle").textContent = file;
   $("#diffView").textContent = "Selected working tree file. Its changes are open in the main panel.";
-  const payload = await request(`/api/repo/diff?path=${encodeURIComponent(state.repoPath)}&file=${encodeURIComponent(file)}`);
+  const payload = await request(`/api/repo/diff?path=${encodeURIComponent(path)}&file=${encodeURIComponent(file)}`);
+  if (version !== inspectorVersion || path !== state.repoPath || state.centerMode !== "worktree") return;
   setDiff("#commitPatch", payload.diff);
 }
 
 async function loadConflict(file) {
+  const version = ++inspectorVersion;
+  const path = state.repoPath;
   state.selectedFile = file;
   state.selectedCommitFile = "";
   state.centerMode = "worktree";
@@ -1380,11 +1442,13 @@ async function loadConflict(file) {
   $("#diffTitle").textContent = file;
   $("#diffView").textContent = "Merge conflict open. Accept a side in the main inspector.";
   iconRefresh();
-  const payload = await request(`/api/repo/conflict?path=${encodeURIComponent(state.repoPath)}&file=${encodeURIComponent(file)}`);
+  const payload = await request(`/api/repo/conflict?path=${encodeURIComponent(path)}&file=${encodeURIComponent(file)}`);
+  if (version !== inspectorVersion || path !== state.repoPath || state.centerMode !== "worktree") return;
   renderConflictResolver(payload);
 }
 
 async function resolveConflict(file, action) {
+  const path = state.repoPath;
   const labels = {
     ours: "Accept Current",
     theirs: "Accept Incoming",
@@ -1411,10 +1475,10 @@ async function resolveConflict(file, action) {
     icon: "git-merge",
     task: () => request("/api/repo/conflict/resolve", {
       method: "POST",
-      body: JSON.stringify({ path: state.repoPath, file, action })
+      body: JSON.stringify({ path, file, action })
     })
   });
-  if (!repo) return;
+  if (!repo || state.repoPath !== path) return;
   state.inspectorOpen = false;
   state.centerMode = "worktree";
   state.selectedFile = "";
@@ -1422,6 +1486,7 @@ async function resolveConflict(file, action) {
 }
 
 async function checkoutBranch(branch) {
+  const path = state.repoPath;
   const confirmed = await confirmAction({
     eyebrow: "Checkout",
     title: "Checkout branch?",
@@ -1440,14 +1505,15 @@ async function checkoutBranch(branch) {
     icon: "git-branch",
     task: () => request("/api/repo/checkout", {
       method: "POST",
-      body: JSON.stringify({ path: state.repoPath, branch })
+      body: JSON.stringify({ path, branch })
     })
   });
-  if (!repo) return;
+  if (!repo || state.repoPath !== path) return;
   applyRepoSnapshot(repo, { source: "action" });
 }
 
 async function createBranch() {
+  const path = state.repoPath;
   const name = $("#newBranchName").value.trim();
   if (!name) return showToast("Enter a branch name first.");
   const repo = await runActionDialog({
@@ -1460,15 +1526,17 @@ async function createBranch() {
     icon: "git-branch-plus",
     task: () => request("/api/repo/branch", {
       method: "POST",
-      body: JSON.stringify({ path: state.repoPath, name })
+      body: JSON.stringify({ path, name })
     })
   });
-  if (!repo) return;
+  if (!repo || state.repoPath !== path) return;
   $("#newBranchName").value = "";
+  $("#branchMenu").hidden = true;
   applyRepoSnapshot(repo, { source: "action" });
 }
 
 async function stashChanges() {
+  const path = state.repoPath;
   if (!state.repoPath) return showToast("Open a repository first.");
   const repo = await runActionDialog({
     eyebrow: "Stash",
@@ -1481,13 +1549,13 @@ async function stashChanges() {
     task: () => request("/api/repo/stash", {
       method: "POST",
       body: JSON.stringify({
-        path: state.repoPath,
+        path,
         message: $("#stashMessage").value.trim(),
         includeUntracked: $("#stashUntracked").checked
       })
     })
   });
-  if (!repo) return;
+  if (!repo || state.repoPath !== path) return;
   $("#stashMessage").value = "";
   applyRepoSnapshot(repo, { source: "action" });
 }
@@ -1506,6 +1574,7 @@ async function quickStash() {
 }
 
 async function applyStash(ref, pop = false) {
+  const path = state.repoPath;
   const verb = pop ? "pop" : "apply";
   const confirmed = await confirmAction({
     eyebrow: "Stash",
@@ -1525,14 +1594,15 @@ async function applyStash(ref, pop = false) {
     icon: pop ? "archive-restore" : "copy-check",
     task: () => request("/api/repo/stash/apply", {
       method: "POST",
-      body: JSON.stringify({ path: state.repoPath, ref, pop })
+      body: JSON.stringify({ path, ref, pop })
     })
   });
-  if (!repo) return;
+  if (!repo || state.repoPath !== path) return;
   applyRepoSnapshot(repo, { source: "action" });
 }
 
 async function dropStash(ref) {
+  const path = state.repoPath;
   const confirmed = await confirmAction({
     eyebrow: "Stash",
     title: "Drop stash?",
@@ -1552,14 +1622,15 @@ async function dropStash(ref) {
     icon: "trash-2",
     task: () => request("/api/repo/stash/drop", {
       method: "POST",
-      body: JSON.stringify({ path: state.repoPath, ref })
+      body: JSON.stringify({ path, ref })
     })
   });
-  if (!repo) return;
+  if (!repo || state.repoPath !== path) return;
   applyRepoSnapshot(repo, { source: "action" });
 }
 
 async function runRepoAction(action) {
+  const path = state.repoPath;
   if (!state.repoPath) return showToast("Open a repository first.");
   const config = {
     fetch: {
@@ -1610,14 +1681,15 @@ async function runRepoAction(action) {
     successToast: config.successToast,
     task: () => request("/api/repo/action", {
       method: "POST",
-      body: JSON.stringify({ path: state.repoPath, action })
+      body: JSON.stringify({ path, action })
     })
   });
-  if (!payload) return;
+  if (!payload || state.repoPath !== path) return;
   applyRepoSnapshot(payload.repo, { source: "action" });
 }
 
 async function fixGitHubAuth() {
+  const path = state.repoPath;
   if (!state.repoPath) return showToast("Open a repository first.");
 
   let targetUser = preferredGitHubUser();
@@ -1634,11 +1706,11 @@ async function fixGitHubAuth() {
   }
   if (!targetUser) return;
 
-  const status = await request(`/api/auth/github?path=${encodeURIComponent(state.repoPath)}`);
+  const status = await request(`/api/auth/github?path=${encodeURIComponent(path)}`);
   const confirmed = await confirmAction({
     eyebrow: "GitHub Auth",
     title: `Fix push auth for @${targetUser}?`,
-    message: "This switches the active GitHub CLI account and configures Git to use GitHub CLI for HTTPS credentials.",
+    message: "This switches the active GitHub CLI account and the global GitHub HTTPS credential helper. This also affects other repositories that use those credentials.",
     icon: "key-round",
     confirmLabel: "Fix Auth",
     output: formatGitHubAuthStatus(status, targetUser)
@@ -1655,7 +1727,7 @@ async function fixGitHubAuth() {
     successToast: "GitHub auth fixed.",
     task: () => request("/api/auth/github/fix", {
       method: "POST",
-      body: JSON.stringify({ path: state.repoPath, user: targetUser })
+      body: JSON.stringify({ path, user: targetUser })
     })
   });
 }
@@ -1676,6 +1748,12 @@ function bindEvents() {
     if (event.key === "Escape") {
       hideCommitContextMenu();
       if (!$("#actionDialog").hidden) cancelActionDialog();
+      else {
+        $("#repoDialog").hidden = true;
+        $("#accountEditorPanel").hidden = true;
+        $("#accountMenu").hidden = true;
+        $("#branchMenu").hidden = true;
+      }
     }
   });
 
@@ -1697,16 +1775,21 @@ function bindEvents() {
 
   commitContextMenu.addEventListener("click", (event) => {
     const button = event.target.closest("[data-commit-action]");
-    if (!button) return;
+    if (!button || button.disabled) return;
     handleCommitContextAction(button.dataset.commitAction, button.dataset.commitHash).catch((error) => showToast(error.message));
   });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const button = form.querySelector('[type="submit"]');
+    if (button.disabled) return;
+    button.disabled = true;
     try {
       await saveCurrentProfile();
     } catch (error) {
       showToast(error.message);
+    } finally {
+      button.disabled = false;
     }
   });
 
@@ -1732,7 +1815,10 @@ function bindEvents() {
     state.selectedId = card.dataset.id;
     renderProfiles();
     fillForm(selectedProfile());
-    if (!activate) $("#accountEditorPanel").hidden = false;
+    if (!activate) {
+      $("#accountMenu").hidden = true;
+      $("#accountEditorPanel").hidden = false;
+    }
     if (activate) {
       try {
         await activateProfile(activate.dataset.activate);
@@ -1765,8 +1851,6 @@ function bindEvents() {
   $("#pullButton").addEventListener("click", () => runRepoAction("pull").catch((error) => showToast(error.message)));
   $("#pushButton").addEventListener("click", () => runRepoAction("push").catch((error) => showToast(error.message)));
   $("#authFixButton").addEventListener("click", () => fixGitHubAuth().catch((error) => showToast(error.message)));
-  $("#undoButton").addEventListener("click", () => showToast("Undo history is ready visually; Git reset is intentionally manual for now."));
-  $("#redoButton").addEventListener("click", () => showToast("Redo history is ready visually; no destructive Git action ran."));
   $("#stashQuickButton").addEventListener("click", () => quickStash().catch((error) => showToast(error.message)));
   $("#popQuickButton").addEventListener("click", () => applyStash("stash@{0}", true).catch((error) => showToast(error.message)));
   $("#createBranchButton").addEventListener("click", () => createBranch().catch((error) => showToast(error.message)));
@@ -1830,6 +1914,11 @@ function bindEvents() {
     if (button && !button.classList.contains("is-current")) checkoutBranch(button.dataset.checkout).catch((error) => showToast(error.message));
   });
 
+  $("#remoteBranchList").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-checkout]");
+    if (button) checkoutBranch(button.dataset.checkout).catch((error) => showToast(error.message));
+  });
+
   $("#fileList").addEventListener("click", (event) => {
     const button = event.target.closest("[data-file]");
     const commitFile = event.target.closest("[data-commit-file]");
@@ -1843,11 +1932,7 @@ function bindEvents() {
     event.preventDefault();
     event.stopPropagation();
     const branchName = branch.dataset.graphBranch || "";
-    const localName = branchName.replace(/^origin\//, "");
-    const target = state.repo?.branches.some((item) => item.name === branchName) ? branchName : localName;
-    const canCheckout = state.repo?.branches.some((item) => item.name === target);
-    if (!canCheckout) return showToast(`${branchName} needs a local tracking branch before checkout.`);
-    return checkoutBranch(target).catch((error) => showToast(error.message));
+    return checkoutBranch(branchName).catch((error) => showToast(error.message));
   });
 
   $("#commitGraph").addEventListener("click", (event) => {
@@ -1855,9 +1940,11 @@ function bindEvents() {
     const graphStash = event.target.closest("[data-graph-stash]");
     const graphApply = event.target.closest("[data-stash-apply]");
     const graphPop = event.target.closest("[data-stash-pop]");
+    const graphDrop = event.target.closest("[data-stash-drop]");
     if (graphStash) return quickStash().catch((error) => showToast(error.message));
     if (graphApply) return applyStash(graphApply.dataset.stashApply, false).catch((error) => showToast(error.message));
     if (graphPop) return applyStash(graphPop.dataset.stashPop, true).catch((error) => showToast(error.message));
+    if (graphDrop) return dropStash(graphDrop.dataset.stashDrop).catch((error) => showToast(error.message));
 
     const wip = event.target.closest("[data-wip-row]");
     if (wip) {
@@ -1956,6 +2043,7 @@ async function boot() {
   }
 
   try {
+    await restorePreferences().catch((error) => showToast(error.message));
     await Promise.all([loadProfiles(), loadStatus(), loadRepos()]);
     const rememberedRepo = state.repos.some((repo) => repo.root === state.repoPath) ? state.repoPath : "";
     const initialRepo = rememberedRepo || state.repos[0]?.root || "";

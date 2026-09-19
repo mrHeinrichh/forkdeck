@@ -1,5 +1,5 @@
 const { send, readBody } = require("../http");
-const { ensureProfiles, saveProfiles, cleanProfile } = require("../storage");
+const { ensureProfiles, updateProfiles, cleanProfile } = require("../storage");
 
 async function handleProfiles(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/profiles") {
@@ -8,20 +8,27 @@ async function handleProfiles(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/profiles") {
     const body = await readBody(req);
-    const store = await ensureProfiles();
     const profile = cleanProfile(body);
-    const index = store.profiles.findIndex((item) => item.id === profile.id);
-    if (index >= 0) store.profiles[index] = profile;
-    else store.profiles.push(profile);
-    await saveProfiles(store);
+    const store = await updateProfiles((data) => {
+      const index = data.profiles.findIndex((item) => item.id === profile.id);
+      if (body.id && index < 0) throw Object.assign(new Error("Profile not found. Create a new profile instead."), { status: 404 });
+      if (data.profiles.some((item) => item.id !== profile.id && item.label.toLowerCase() === profile.label.toLowerCase())) {
+        throw Object.assign(new Error("A profile with this label already exists. Choose another label."), { status: 409 });
+      }
+      if (index >= 0) data.profiles[index] = profile;
+      else data.profiles.push(profile);
+    });
     return send(res, 200, { profile, profiles: store.profiles });
   }
 
-  if (req.method === "DELETE" && url.pathname.startsWith("/api/profiles/")) {
-    const id = decodeURIComponent(url.pathname.split("/").pop());
-    const store = await ensureProfiles();
-    store.profiles = store.profiles.filter((profile) => profile.id !== id);
-    await saveProfiles(store);
+  if (req.method === "DELETE" && /^\/api\/profiles\/[^/]+$/.test(url.pathname)) {
+    let id;
+    try { id = decodeURIComponent(url.pathname.split("/").pop()); }
+    catch { throw Object.assign(new Error("Invalid profile ID."), { status: 400 }); }
+    const store = await updateProfiles((data) => {
+      if (!data.profiles.some((profile) => profile.id === id)) throw Object.assign(new Error("Profile not found."), { status: 404 });
+      data.profiles = data.profiles.filter((profile) => profile.id !== id);
+    });
     return send(res, 200, store);
   }
 

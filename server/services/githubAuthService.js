@@ -3,8 +3,10 @@ const { promisify } = require("node:util");
 const { ROOT } = require("../config");
 const { git, repoRoot } = require("../git");
 const { resolveCommand, commandOptions, commandError, toolStatus } = require("../commands");
+const { redactSensitive } = require("../redact");
 
 const execFileAsync = promisify(execFile);
+let pendingRepair = Promise.resolve();
 
 function isGithubUser(value) {
   return /^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/i.test(String(value || "").trim());
@@ -12,16 +14,28 @@ function isGithubUser(value) {
 
 function parseGitHubRemote(remote) {
   const value = String(remote || "").trim();
-  const httpsMatch = value.match(/^https:\/\/github\.com\/([^/]+)\/(.+?)(?:\.git)?$/i);
-  const sshMatch = value.match(/^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/i);
-  const match = httpsMatch || sshMatch;
-  if (!match) return { url: value, host: "", owner: "", repo: "", protocol: "" };
+  const unrecognized = { url: redactSensitive(value), host: "", owner: "", repo: "", protocol: "" };
+  if (/[\u0000-\u001f\u007f]/.test(value)) return unrecognized;
+  let protocol = "";
+  let remotePath = "";
+  try {
+    const url = new URL(value);
+    if (url.hostname.toLowerCase() === "github.com" && !url.port && !url.search && !url.hash && ["https:", "ssh:"].includes(url.protocol)) {
+      protocol = url.protocol.slice(0, -1);
+      remotePath = url.pathname.slice(1);
+    }
+  } catch {
+    const match = value.match(/^git@github\.com:(.+)$/i);
+    if (match) { protocol = "ssh"; remotePath = match[1]; }
+  }
+  const match = remotePath.match(/^([^/]+)\/([a-z\d_.-]+?)\/?$/i);
+  if (!match || !isGithubUser(match[1]) || !protocol) return unrecognized;
   return {
-    url: value,
+    url: redactSensitive(value),
     host: "github.com",
     owner: match[1],
     repo: match[2].replace(/\.git$/i, ""),
-    protocol: httpsMatch ? "https" : "ssh"
+    protocol
   };
 }
 
@@ -31,29 +45,33 @@ async function runCli(command, args, allowFailure = false) {
     return `${stdout || ""}${stderr || ""}`.trimEnd();
   } catch (error) {
     if (allowFailure) return `${error.stdout || ""}${error.stderr || error.message || ""}`.trimEnd();
-    throw commandError(command, error);
+    const safeError = commandError(command, error);
+    safeError.message = redactSensitive(safeError.message);
+    throw safeError;
   }
 }
 
-function runWithInput(command, args, input, allowFailure = false) {
+function runWithInput(command, args, input, allowFailure = false, cwd = ROOT) {
   return new Promise((resolve, reject) => {
-    const child = spawn(resolveCommand(command), args, { ...commandOptions(ROOT), stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(resolveCommand(command), args, { ...commandOptions(cwd), timeout: 15000, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
+      if (stdout.length > 1024 * 1024) child.kill();
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
+      if (stderr.length > 1024 * 1024) child.kill();
     });
     child.on("error", (error) => {
-      if (allowFailure) resolve(String(error.message || ""));
+      if (allowFailure) resolve("");
       else reject(commandError(command, error));
     });
     child.on("close", (code) => {
-      const output = `${stdout || ""}${stderr || ""}`.trimEnd();
-      if (code === 0 || allowFailure) return resolve(output);
-      const error = new Error(output || `${command} exited with ${code}`);
+      if (code === 0) return resolve(stdout.trimEnd());
+      if (allowFailure) return resolve("");
+      const error = new Error(redactSensitive(stderr) || `${command} exited with ${code}`);
       error.status = 400;
       reject(error);
     });
@@ -84,26 +102,27 @@ function parseGhAuthStatus(raw) {
     if (activeAccount && protocolMatch) activeAccount.gitProtocol = protocolMatch[1];
   }
 
+  const githubAccounts = accounts.filter((account) => account.host.toLowerCase() === "github.com");
   return {
-    available: accounts.length > 0,
-    accounts,
-    activeUser: accounts.find((account) => account.active)?.user || "",
-    activeProtocol: accounts.find((account) => account.active)?.gitProtocol || ""
+    available: githubAccounts.length > 0,
+    accounts: githubAccounts,
+    activeUser: githubAccounts.find((account) => account.active)?.user || "",
+    activeProtocol: githubAccounts.find((account) => account.active)?.gitProtocol || ""
   };
 }
 
 function parseCredential(raw) {
-  const fields = {};
+  const fields = Object.create(null);
   for (const line of String(raw || "").split(/\r?\n/)) {
     const index = line.indexOf("=");
     if (index === -1) continue;
     fields[line.slice(0, index)] = line.slice(index + 1);
   }
   return {
-    protocol: fields.protocol || "",
-    host: fields.host || "",
-    path: fields.path || "",
-    username: fields.username || "",
+    protocol: redactSensitive(fields.protocol),
+    host: redactSensitive(fields.host),
+    path: redactSensitive(fields.path),
+    username: isGithubUser(fields.username) ? redactSensitive(fields.username) : "",
     hasPassword: Boolean(fields.password)
   };
 }
@@ -111,31 +130,41 @@ function parseCredential(raw) {
 async function readRepoRemote(repoPath) {
   if (!repoPath) return { root: "", remote: "" };
   const root = await repoRoot(repoPath);
-  const remote = await git(["-C", root, "remote", "get-url", "origin"], ROOT, true);
+  const branch = await git(["-C", root, "symbolic-ref", "--short", "HEAD"], ROOT, true);
+  const [branchPushRemote, pushDefault, branchRemote] = await Promise.all([
+    branch ? git(["-C", root, "config", "--get", `branch.${branch}.pushRemote`], ROOT, true) : "",
+    git(["-C", root, "config", "--get", "remote.pushDefault"], ROOT, true),
+    branch ? git(["-C", root, "config", "--get", `branch.${branch}.remote`], ROOT, true) : ""
+  ]);
+  const remoteName = branchPushRemote || pushDefault || branchRemote || "origin";
+  const remote = await git(["-C", root, "remote", "get-url", "--push", remoteName], ROOT, true);
   return { root, remote };
 }
 
-async function readCredential(remoteInfo) {
+async function readCredential(remoteInfo, root, remote) {
   if (remoteInfo.protocol !== "https" || remoteInfo.host !== "github.com") return null;
-  const input = [
-    "protocol=https",
-    "host=github.com",
-    `path=${remoteInfo.owner}/${remoteInfo.repo}.git`,
-    "",
-    ""
-  ].join("\n");
-  const raw = await runWithInput("git", ["credential", "fill"], input, true);
+  // Use the actual URL, including any username/password override, so this
+  // reports the credentials Git push will resolve for this repository.
+  const input = `url=${remote}\n\n`;
+  const raw = await runWithInput("git", ["credential", "fill"], input, true, root || ROOT);
   return parseCredential(raw);
 }
 
-async function readCredentialHelpers() {
+function helperLabel(helper) {
+  if (/gh(?:["']|\.exe)?\s+auth\s+git-credential/i.test(helper)) return "GitHub CLI (gh auth git-credential)";
+  const known = helper.match(/^(?:.*[\\/])?(git-credential-)?(osxkeychain|wincred|manager-core|manager|cache|store)(?:\s|$)/i);
+  return known ? known[2] : "Custom credential helper (command hidden)";
+}
+
+async function readCredentialHelpers(root) {
+  const scope = root ? ["-C", root, "config"] : ["config", "--global"];
   const [globalHelpers, githubHelpers] = await Promise.all([
     git(["config", "--global", "--get-all", "credential.helper"], ROOT, true),
-    git(["config", "--global", "--get-all", "credential.https://github.com.helper"], ROOT, true)
+    git([...scope, "--get-all", "credential.https://github.com.helper"], ROOT, true)
   ]);
   return {
-    global: globalHelpers.split("\n").filter(Boolean),
-    github: githubHelpers.split("\n").filter(Boolean)
+    global: globalHelpers.split("\n").filter(Boolean).map(helperLabel),
+    github: githubHelpers.split("\n").filter(Boolean).map(helperLabel)
   };
 }
 
@@ -143,31 +172,54 @@ async function readGitHubAuth({ path = "" } = {}) {
   const { root, remote } = await readRepoRemote(path);
   const remoteInfo = parseGitHubRemote(remote);
   const [authRaw, credential, helpers, ghTool] = await Promise.all([
-    runCli("gh", ["auth", "status"], true),
-    readCredential(remoteInfo),
-    readCredentialHelpers(),
+    runCli("gh", ["auth", "status", "--hostname", "github.com"], true),
+    readCredential(remoteInfo, root, remote),
+    readCredentialHelpers(root),
     toolStatus("gh")
   ]);
   return {
-    repo: { root, remote, github: remoteInfo },
-    gh: { ...parseGhAuthStatus(authRaw), installed: ghTool.available, error: ghTool.error || "" },
+    repo: { root, remote: redactSensitive(remote), github: remoteInfo },
+    gh: { ...parseGhAuthStatus(authRaw), installed: ghTool.available, error: redactSensitive(ghTool.error) },
     credential,
     helpers
   };
 }
 
-async function fixGitHubAuth({ path = "", user = "" } = {}) {
-  const targetUser = String(user || "").trim().replace(/^@/, "");
+function fixGitHubAuth(options = {}) {
+  const repair = pendingRepair.then(() => performAuthRepair(options));
+  pendingRepair = repair.catch(() => {});
+  return repair;
+}
+
+async function performAuthRepair({ path = "", user = "" } = {}) {
+  const targetUser = typeof user === "string" ? user.trim().replace(/^@/, "") : "";
   if (!isGithubUser(targetUser)) {
     const error = new Error("Enter a valid GitHub username for push authentication.");
     error.status = 400;
     throw error;
   }
 
-  await runCli("gh", ["auth", "switch", "--hostname", "github.com", "--user", targetUser]);
-  await runCli("gh", ["auth", "setup-git", "--hostname", "github.com"]);
+  // Validate before changing the active account or any global credential helper.
+  if (typeof path !== "string" || !path.trim()) throw Object.assign(new Error("Choose a repository before repairing GitHub authentication."), { status: 400 });
+  const { root, remote } = await readRepoRemote(path);
+  const remoteInfo = parseGitHubRemote(remote);
+  if (remoteInfo.protocol !== "https" || remoteInfo.host !== "github.com") {
+    throw Object.assign(new Error("Fix Auth supports GitHub HTTPS remotes. SSH remotes use SSH keys; configure the key or change origin to its GitHub HTTPS URL."), { status: 400 });
+  }
 
-  const status = await readGitHubAuth({ path });
+  await runCli("gh", ["auth", "switch", "--hostname", "github.com", "--user", targetUser]);
+  try {
+    await runCli("gh", ["auth", "setup-git", "--hostname", "github.com"]);
+  } catch (error) {
+    error.message = `GitHub CLI switched to @${targetUser}, but configuring Git's credential helper failed: ${error.message}`;
+    throw error;
+  }
+
+  const status = await readGitHubAuth({ path: root });
+  if (status.gh.activeUser.toLowerCase() !== targetUser.toLowerCase() ||
+      status.credential?.username?.toLowerCase() !== targetUser.toLowerCase() || !status.credential?.hasPassword) {
+    throw Object.assign(new Error("GitHub CLI settings were updated, but this repository still does not return credentials for the selected account. Check credentials embedded in the remote URL, repository credential helpers, credential.username, and GH_TOKEN/GITHUB_TOKEN environment overrides before pushing."), { status: 409 });
+  }
   const credentialUser = status.credential?.username || "not available";
   const helper = status.helpers.github.join(", ") || "not configured";
   return {
@@ -177,7 +229,7 @@ async function fixGitHubAuth({ path = "", user = "" } = {}) {
       `Git HTTPS credential user: ${credentialUser}`,
       `GitHub credential helper: ${helper}`,
       "",
-      "Git push will use GitHub authentication, not only commit user.name/user.email."
+      "HTTPS credentials now match the selected account. Repository access will be checked when you push."
     ].join("\n")
   };
 }

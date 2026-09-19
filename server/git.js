@@ -6,11 +6,14 @@ const { resolveCommand, commandOptions, commandError } = require("./commands");
 
 const execFileAsync = promisify(execFile);
 
-async function git(args, cwd = ROOT, allowFailure = false) {
+async function git(args, cwd = ROOT, allowFailure = false, { preserveOutput = false } = {}) {
   try {
-    const { stdout } = await execFileAsync(resolveCommand("git"), ["-c", "core.quotepath=false", ...args], commandOptions(cwd));
+    // Scope literal matching to commands receiving paths. Stash internally uses
+    // magic pathspecs; setting this globally prevents it from cleaning untracked files.
+    const literal = args.includes("--") ? ["--literal-pathspecs"] : [];
+    const { stdout } = await execFileAsync(resolveCommand("git"), [...literal, "-c", "core.quotepath=false", "-c", "color.ui=false", ...args], commandOptions(cwd));
     // Tabs and spaces can be meaningful (empty log refs, filenames, config values).
-    return stdout.replace(/(?:\r?\n)+$/, "");
+    return preserveOutput ? stdout : stdout.replace(/(?:\r?\n)+$/, "");
   } catch (error) {
     if (allowFailure) return "";
     throw commandError("git", error);
@@ -23,14 +26,15 @@ async function repoRoot(repoPath) {
   }
   const requested = path.resolve(String(repoPath));
   const root = await git(["-C", requested, "rev-parse", "--show-toplevel"]);
-  return path.resolve(root.trim());
+  return path.resolve(root);
 }
 
 function repoFilePath(root, file, pathApi = path) {
   const requested = String(file || "");
   const resolved = pathApi.resolve(root, requested);
   const relative = pathApi.relative(root, resolved);
-  if (!requested || !relative || relative === ".." || relative.startsWith(`..${pathApi.sep}`) || pathApi.isAbsolute(relative)) {
+  if (!requested || requested.includes("\0") || !relative || relative === ".." || relative.startsWith(`..${pathApi.sep}`) || pathApi.isAbsolute(relative)
+    || relative.split(pathApi.sep).some((part) => part.toLowerCase() === ".git")) {
     const error = new Error("File path must stay inside the repository.");
     error.status = 400;
     throw error;

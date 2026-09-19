@@ -75,8 +75,8 @@
           <button id="pullButton" type="button" class="tool-button"><i data-lucide="arrow-down-to-line"></i>Pull</button>
           <button id="pushButton" type="button" class="tool-button"><i data-lucide="arrow-up-from-line"></i>Push</button>
           <button id="authFixButton" type="button" class="tool-button auth-fix-button"><i data-lucide="key-round"></i>Fix Auth</button>
-          <button id="undoButton" type="button" class="icon-button" title="Undo" aria-label="Undo"><i data-lucide="undo-2"></i></button>
-          <button id="redoButton" type="button" class="icon-button" title="Redo" aria-label="Redo"><i data-lucide="redo-2"></i></button>
+          <button id="undoButton" type="button" class="icon-button" disabled title="Undo is not available in this version" aria-label="Undo (unavailable)"><i data-lucide="undo-2"></i></button>
+          <button id="redoButton" type="button" class="icon-button" disabled title="Redo is not available in this version" aria-label="Redo (unavailable)"><i data-lucide="redo-2"></i></button>
           <button id="stashQuickButton" type="button" class="tool-button"><i data-lucide="archive"></i>Stash</button>
           <button id="popQuickButton" type="button" class="tool-button"><i data-lucide="archive-restore"></i>Pop</button>
           <button id="refreshButton" class="icon-button" title="Refresh" aria-label="Refresh">
@@ -89,7 +89,7 @@
               <i data-lucide="chevron-down"></i>
             </button>
             <div id="accountMenu" class="account-menu" hidden>
-              <div class="menu-title">Switch commit user</div>
+              <div class="menu-title">Commit identity for this repository</div>
               <div id="accountMenuProfiles"></div>
               <button id="addAccountMenuButton" type="button" class="menu-action"><i data-lucide="user-plus"></i>Add user</button>
             </div>
@@ -134,9 +134,9 @@
               <button class="nav-item" data-nav="local"><i data-lucide="git-branch"></i>Local<span id="localNavCount">0</span></button>
               <button class="nav-item" data-nav="remote"><i data-lucide="cloud"></i>Remote<span id="remoteNavCount">0</span></button>
               <button class="nav-item" data-nav="stashes"><i data-lucide="archive"></i>Stashes<span id="stashNavCount">0</span></button>
-              <button class="nav-item" data-nav="prs"><i data-lucide="git-pull-request"></i>PRs<span>0</span></button>
-              <button class="nav-item" data-nav="issues"><i data-lucide="circle-dot"></i>Issues<span>0</span></button>
-              <button class="nav-item" data-nav="teams"><i data-lucide="users"></i>Teams<span>0</span></button>
+              <button class="nav-item" data-nav="prs" disabled title="Not available in this version"><i data-lucide="git-pull-request"></i>PRs<span>0</span></button>
+              <button class="nav-item" data-nav="issues" disabled title="Not available in this version"><i data-lucide="circle-dot"></i>Issues<span>0</span></button>
+              <button class="nav-item" data-nav="teams" disabled title="Not available in this version"><i data-lucide="users"></i>Teams<span>0</span></button>
             </div>
           </div>
 
@@ -160,19 +160,19 @@
             <div id="remoteBranchList" class="side-list"></div>
           </div>
 
-          <div class="panel side-section" id="prsPanel">
+          <div class="panel side-section" id="prsPanel" hidden>
             <p class="eyebrow">Pull Requests</p>
-            <div class="empty compact-empty">GitHub PR sync can be wired through GitHub CLI next.</div>
+            <div class="empty compact-empty">Pull request integration is not available in this version.</div>
           </div>
 
-          <div class="panel side-section" id="issuesPanel">
+          <div class="panel side-section" id="issuesPanel" hidden>
             <p class="eyebrow">Issues</p>
-            <div class="empty compact-empty">GitHub issue sync can be added for this remote.</div>
+            <div class="empty compact-empty">Issue integration is not available in this version.</div>
           </div>
 
-          <div class="panel side-section" id="teamsPanel">
+          <div class="panel side-section" id="teamsPanel" hidden>
             <p class="eyebrow">Teams</p>
-            <div class="empty compact-empty">Team views need GitHub organization access.</div>
+            <div class="empty compact-empty">Team integration is not available in this version.</div>
           </div>
         </aside>
 

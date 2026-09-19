@@ -18,7 +18,7 @@ function parseStatus(raw) {
   let behind = 0;
   if (branchLine) {
     const text = branchLine.slice(3);
-    branch = text.startsWith("No commits yet on ")
+    branch = text.startsWith("HEAD (no branch)") || text.startsWith("HEAD (detached") ? "detached" : text.startsWith("No commits yet on ")
       ? text.replace("No commits yet on ", "")
       : text.split("...")[0].split(" ")[0];
     const aheadMatch = text.match(/ahead (\d+)/);
@@ -120,7 +120,11 @@ function parseStashes(raw) {
     .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => {
-      const [ref, relativeDate, timestamp, subject, hash, parents] = line.split("\t");
+      const fields = line.split("\t");
+      const [ref, relativeDate, timestamp] = fields;
+      const parents = fields.pop();
+      const hash = fields.pop();
+      const subject = fields.slice(3).join("\t");
       const parentList = parents ? parents.split(" ").filter(Boolean) : [];
       return {
         ref,

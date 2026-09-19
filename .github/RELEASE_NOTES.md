@@ -1,4 +1,19 @@
-ForkDeck is now a standalone desktop app for macOS and Windows, with its own bundled runtime, native folder selection, offline icons, and protected local Git API.
+ForkDeck 1.1.2 fixes issues found during a full pass through the existing Git, identity, desktop, and interface workflows.
+
+## Fixes
+
+- Commit profiles apply only to the selected repository; global Git identity remains unchanged.
+- New files and staged/unstaged changes display correctly, including unusual filenames, deleted files, and merge commits.
+- Remote checkout creates tracking branches; pushing a new branch configures its upstream.
+- Merge conflict resolution handles deleted sides; stash actions include a visible Drop control, and helper commits no longer clutter the graph.
+- Repository/folder selections persist across desktop restarts. Concurrent saves preserve all changes.
+- Small windows fit, empty commits stop loading correctly, and stale requests cannot replace a newer selection or Git action.
+- GitHub auth diagnostics check the actual push remote and effective account, and hide credentials.
+- Unsupported actions are no longer presented as working commands.
+
+## Verification
+
+Real Git regression tests use disposable repositories and local bare remotes. Browser tests use real interface clicks. Native packaged launch checks run on macOS Apple silicon, macOS Intel, and Windows x64. External GitHub account changes are simulated in tests; native folder-dialog results are stubbed.
 
 ## Downloads
 

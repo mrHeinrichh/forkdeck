@@ -1,7 +1,8 @@
 const path = require("node:path");
 const { ROOT } = require("../config");
 const { git, repoRoot } = require("../git");
-const { ensureRepos, saveRepos } = require("../storage");
+const { updateRepos } = require("../storage");
+const { redactSensitive } = require("../redact");
 const { parseStatus, parseBranches, parseRemoteBranches, parseCommits, parseStashes } = require("../parsers");
 const { toolStatus } = require("../commands");
 
@@ -24,18 +25,24 @@ async function appStatus() {
 
 async function repoSnapshot(repoPath) {
   const root = await repoRoot(repoPath);
-  const [statusRaw, branchesRaw, remoteBranchesRaw, commitsRaw, stashesRaw, remote] = await Promise.all([
-    git(["-C", root, "status", "--porcelain=v1", "-b", "-z"]),
+  const head = await git(["-C", root, "rev-parse", "--verify", "HEAD"], ROOT, true);
+  const [statusRaw, branchesRaw, remoteBranchesRaw, commitsRaw, stashesRaw, remote, name, email] = await Promise.all([
+    git(["-C", root, "status", "--porcelain=v1", "-b", "-z", "--untracked-files=all"]),
     git(["-C", root, "branch", "--format=%(refname:short)%09%(HEAD)%09%(upstream:short)"], ROOT, true),
     git(["-C", root, "branch", "-r", "--format=%(refname:short)"], ROOT, true),
-    git(["-C", root, "log", "--all", "--topo-order", "--date=relative", "--pretty=format:%H%x09%h%x09%P%x09%an%x09%ar%x09%ct%x09%s%x09%D", "-n", "120"], ROOT, true),
+    // Stashes have their own rows; --all also adds their index/untracked helper
+    // commits to the graph. Explicit refs retain real history and detached HEAD.
+    git(["-C", root, "log", "--branches", "--remotes", "--tags", ...(head ? [head] : []), "--topo-order", "--date=relative", "--pretty=format:%H%x09%h%x09%P%x09%an%x09%ar%x09%ct%x09%s%x09%D", "-n", "120"], ROOT, true),
     git(["-C", root, "stash", "list", "--format=%gd%x09%cr%x09%ct%x09%s%x09%H%x09%P"], ROOT, true),
-    git(["-C", root, "remote", "get-url", "origin"], ROOT, true)
+    git(["-C", root, "remote", "get-url", "origin"], ROOT, true),
+    git(["-C", root, "config", "--get", "user.name"], ROOT, true),
+    git(["-C", root, "config", "--get", "user.email"], ROOT, true)
   ]);
   const status = parseStatus(statusRaw);
   return {
     root,
-    remote,
+    remote: redactSensitive(remote),
+    identity: { name, email },
     branch: status.branch,
     ahead: status.ahead,
     behind: status.behind,
@@ -49,14 +56,15 @@ async function repoSnapshot(repoPath) {
 
 async function rememberRepo(repoPath) {
   const root = await repoRoot(repoPath);
-  const store = await ensureRepos();
   const name = path.basename(root);
   const remote = await git(["-C", root, "remote", "get-url", "origin"], ROOT, true);
-  const existing = store.repos.findIndex((repo) => repo.root === root);
-  const record = { root, name, remote, lastOpened: new Date().toISOString() };
-  if (existing >= 0) store.repos[existing] = { ...store.repos[existing], ...record };
-  else store.repos.unshift(record);
-  await saveRepos(store);
+  const record = { root, name, remote: redactSensitive(remote), lastOpened: new Date().toISOString() };
+  const store = await updateRepos((value) => {
+    value.repos = value.repos.map((repo) => ({ ...repo, remote: redactSensitive(repo.remote || "") }));
+    const existing = value.repos.findIndex((repo) => repo.root === root);
+    if (existing >= 0) value.repos[existing] = { ...value.repos[existing], ...record };
+    else value.repos.unshift(record);
+  });
   return { store, record };
 }
 

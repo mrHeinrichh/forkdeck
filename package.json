@@ -1,19 +1,20 @@
 {
   "name": "forkdeck",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "A visual local Git workspace for branches, commits, stash, diffs, and commit identities.",
   "main": "desktop/main.js",
   "scripts": {
     "dev": "node server.js",
     "check": "node scripts/check.js",
-    "test": "node --test",
+    "test": "node --test \"tests/*.test.js\"",
     "start": "node server.js",
     "desktop": "electron .",
     "prepare": "node scripts/vendor.js",
     "dist": "node scripts/build-desktop.js",
     "dist:mac": "node scripts/build-desktop.js --mac --arm64 --x64",
     "dist:win": "node scripts/build-desktop.js --win --x64",
-    "smoke:desktop": "node scripts/smoke-desktop.js"
+    "smoke:desktop": "node scripts/smoke-desktop.js",
+    "test:ui": "node scripts/test-ui.js"
   },
   "keywords": [
     "git",
@@ -33,7 +34,8 @@
   "devDependencies": {
     "electron": "44.4.3",
     "electron-builder": "26.15.3",
-    "lucide": "1.47.0"
+    "lucide": "1.47.0",
+    "playwright": "1.63.0"
   },
   "build": {
     "appId": "com.mrheinrichh.forkdeck",
@@ -41,7 +43,10 @@
     "asar": true,
     "afterPack": "scripts/prepare-macos-sign.js",
     "npmRebuild": false,
-    "directories": { "output": "dist", "buildResources": "build" },
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
     "files": [
       "desktop/**/*",
       "server/**/*",
@@ -63,12 +68,19 @@
       "notarize": false,
       "timestamp": "none",
       "minimumSystemVersion": "13.0",
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
-    "dmg": { "title": "ForkDeck ${version}" },
+    "dmg": {
+      "title": "ForkDeck ${version}"
+    },
     "win": {
       "icon": "build/icon.png",
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
     },
     "nsis": {
       "oneClick": false,

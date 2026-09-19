@@ -3,6 +3,7 @@ const path = require("node:path");
 const os = require("node:os");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
+const { redactSensitive } = require("./redact");
 
 const execFileAsync = promisify(execFile);
 
@@ -53,7 +54,7 @@ function commandError(command, error) {
     return Object.assign(new Error(`${name} is not installed or could not be found. Install it from ${url} and restart ForkDeck.`), { status: 503 });
   }
   if (error.killed) return Object.assign(new Error(`${command} timed out. Check your connection and Git authentication, then try again.`), { status: 408 });
-  return Object.assign(new Error(String(error.stderr || error.stdout || error.message).trim()), { status: 400 });
+  return Object.assign(new Error(redactSensitive(error.stderr || error.stdout || error.message).trim()), { status: 400 });
 }
 
 async function toolStatus(command) {

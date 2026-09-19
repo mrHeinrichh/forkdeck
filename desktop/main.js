@@ -2,53 +2,50 @@ const { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } = require("e
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const policies = require("./policies");
+const { createPreferenceStore } = require("./preferences");
+const { smokeConfiguration } = require("./smoke-config");
 
 app.setName("ForkDeck");
-const smokeMode = process.argv.includes("--forkdeck-smoke") && Boolean(process.env.FORKDECK_SMOKE_REPORT);
-if (smokeMode && process.env.FORKDECK_SMOKE_USER_DATA) app.setPath("userData", process.env.FORKDECK_SMOKE_USER_DATA);
+const smoke = smokeConfiguration(process.argv, process.env);
+const smokeMode = Boolean(smoke);
+if (smokeMode) app.setPath("userData", smoke.userData);
 
 let mainWindow;
 let server;
 let origin;
+let preferences;
 let quitting = false;
 const token = crypto.randomBytes(32).toString("hex");
 const rendererErrors = [];
+const smokeExternalLinks = [];
 
 function isAppUrl(value) {
-  try { return new URL(value).origin === origin; } catch { return false; }
-}
-
-function isAllowedImage(details) {
-  try {
-    const url = new URL(details.url);
-    return details.resourceType === "image" && url.protocol === "https:" &&
-      ["github.com", "avatars.githubusercontent.com"].includes(url.hostname) && !url.username && !url.password;
-  } catch { return false; }
+  return policies.isAppUrl(value, origin);
 }
 
 function canWriteClipboard(contents, permission, details) {
-  return permission === "clipboard-sanitized-write" && Boolean(mainWindow) &&
-    contents === mainWindow.webContents && details?.isMainFrame === true &&
-    isAppUrl(details.requestingUrl) && isAppUrl(contents.getURL());
+  return policies.canWriteClipboard(contents, permission, details, mainWindow, origin);
 }
 
 function openExternal(value) {
-  try {
-    const url = new URL(value);
-    if (url.protocol === "https:" && !url.username && !url.password) {
-      shell.openExternal(url.href).catch((error) => console.error("Could not open link:", error.message));
-    }
-  } catch { /* Reject malformed and non-HTTPS links. */ }
+  const url = policies.externalUrl(value);
+  if (!url) return;
+  if (smokeMode) smokeExternalLinks.push(url); // Native checks must never open the user's browser.
+  else shell.openExternal(url).catch((error) => console.error("Could not open link:", error.message));
 }
 
 async function finishSmoke(error, checks = {}) {
-  await fs.writeFile(process.env.FORKDECK_SMOKE_REPORT, JSON.stringify({
+  try { await preferences?.flush(); } catch (flushError) { error ||= flushError; }
+  await fs.writeFile(smoke.report, JSON.stringify({
     ok: !error,
     error: error ? error.stack || String(error) : undefined,
     version: app.getVersion(),
     platform: process.platform,
     arch: process.arch,
     packaged: app.isPackaged,
+    origin,
+    phase: smoke.phase,
     checks
   }, null, 2));
   if (server) await new Promise((resolve) => {
@@ -61,7 +58,7 @@ async function finishSmoke(error, checks = {}) {
 async function runSmoke() {
   const { checkDesktop } = require("./smoke");
   try {
-    const checks = await checkDesktop({ mainWindow, origin, rendererErrors });
+    const checks = await checkDesktop({ mainWindow, origin, rendererErrors, smoke, createWindow, getWindow: () => mainWindow, preferences, externalLinks: smokeExternalLinks });
     await finishSmoke(null, checks);
   } catch (error) {
     await finishSmoke(error);
@@ -119,12 +116,13 @@ async function createWindow() {
   window.on("closed", () => { if (mainWindow === window) mainWindow = null; });
   window.once("ready-to-show", () => { if (!smokeMode) window.show(); });
   await window.loadURL(origin);
-  if (smokeMode) await runSmoke();
+  return window;
 }
 
 async function start() {
   process.env.FORKDECK_DATA_DIR = path.join(app.getPath("userData"), "data");
   process.env.FORKDECK_DESKTOP_TOKEN = token;
+  preferences = createPreferenceStore(path.join(app.getPath("userData"), "preferences.json"));
   // Load only after setting configuration; the server runs inside Electron's Node runtime.
   const { createServer } = require("../server/app");
   server = createServer();
@@ -144,23 +142,24 @@ async function start() {
   desktopSession.on("will-download", (event) => event.preventDefault());
   // The token stays in the main process. Only this private session can call the API.
   desktopSession.webRequest.onBeforeRequest((details, callback) => {
-    callback({ cancel: !isAppUrl(details.url) && !isAllowedImage(details) });
+    callback({ cancel: !isAppUrl(details.url) && !policies.isAllowedImage(details) });
   });
   desktopSession.webRequest.onBeforeSendHeaders((details, callback) => {
-    if (!isAppUrl(details.url)) {
-      if (!isAllowedImage(details)) return callback({ cancel: true });
-      const requestHeaders = { ...details.requestHeaders };
-      for (const name of Object.keys(requestHeaders)) {
-        if (name.toLowerCase() === "x-forkdeck-token") delete requestHeaders[name];
-      }
-      return callback({ requestHeaders });
-    }
-    callback({ requestHeaders: { ...details.requestHeaders, "X-ForkDeck-Token": token } });
+    callback(policies.requestHeaders(details, origin, token));
+  });
+  function assertTrustedFrame(event) {
+    if (!policies.trustedFrame(event, mainWindow, origin)) throw new Error("Untrusted desktop request.");
+  }
+  ipcMain.handle("forkdeck:get-preferences", async (event) => {
+    assertTrustedFrame(event);
+    return preferences.get();
+  });
+  ipcMain.handle("forkdeck:set-preferences", async (event, values) => {
+    assertTrustedFrame(event);
+    await preferences.set(values);
   });
   ipcMain.handle("forkdeck:choose-directory", async (event) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame || !isAppUrl(event.senderFrame.url)) {
-      throw new Error("Untrusted directory request.");
-    }
+    assertTrustedFrame(event);
     const result = await dialog.showOpenDialog(mainWindow, {
       title: "Open a Git repository",
       buttonLabel: "Open Repository",
@@ -171,6 +170,7 @@ async function start() {
   });
   installMenu();
   await createWindow();
+  if (smokeMode) await runSmoke();
 }
 
 const hasLock = smokeMode || app.requestSingleInstanceLock();
@@ -186,14 +186,18 @@ else {
   });
   app.whenReady().then(start).catch(showStartupError);
   app.on("activate", () => { if (!mainWindow && origin) createWindow().catch(showStartupError); });
-  app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+  app.on("window-all-closed", () => { if (!smokeMode && process.platform !== "darwin") app.quit(); });
   app.on("before-quit", (event) => {
     if (quitting || !server) return;
     event.preventDefault();
     quitting = true;
     const timeout = setTimeout(() => app.exit(0), 3000);
     timeout.unref();
-    server.close(() => { clearTimeout(timeout); app.quit(); });
+    server.close(async () => {
+      try { await preferences?.flush(); } catch (error) { console.error("Could not save workspace preferences:", error.message); }
+      clearTimeout(timeout);
+      app.quit();
+    });
     server.closeIdleConnections?.();
   });
 }

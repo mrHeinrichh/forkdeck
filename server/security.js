@@ -22,7 +22,9 @@ function validateRequest(req, token = process.env.FORKDECK_DESKTOP_TOKEN || "") 
       base.pathname !== "/" || base.search || base.hash || Number(base.port || 80) !== req.socket.localPort) {
     throw requestError(403, "Invalid local Host header.");
   }
-  const url = new URL(req.url, base);
+  let url;
+  try { url = new URL(req.url, base); }
+  catch { throw requestError(400, "Invalid request URL."); }
   if (url.origin !== base.origin) throw requestError(403, "Request must use the local app origin.");
 
   const origin = req.headers.origin;
