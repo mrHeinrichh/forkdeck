@@ -13,6 +13,7 @@
     "dist": "node scripts/build-desktop.js",
     "dist:mac": "node scripts/build-desktop.js --mac --arm64 --x64",
     "dist:win": "node scripts/build-desktop.js --win --x64",
+    "build:website": "node scripts/build-website.js",
     "smoke:desktop": "node scripts/smoke-desktop.js",
     "test:ui": "node scripts/test-ui.js",
     "test:workspace": "node scripts/test-workspace-ui.js"

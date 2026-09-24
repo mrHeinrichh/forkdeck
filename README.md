@@ -6,7 +6,7 @@ Created by **[Heinric Fabros](https://mrheinrich.vercel.app/)**. Visit my [portf
 
 ## Download
 
-Visit the [download website](https://forkdeck.vercel.app), or download installers from [GitHub Releases](https://github.com/mrHeinrichh/forkdeck/releases/latest). Each release includes SHA-256 checksums.
+Visit the [download website](https://forkdeck.netlify.app), or download installers from [GitHub Releases](https://github.com/mrHeinrichh/forkdeck/releases/latest). Each release includes SHA-256 checksums.
 
 | Platform | Installer | Requirements |
 | --- | --- | --- |
@@ -54,11 +54,17 @@ If a push reports access denied for the wrong GitHub account, the **Fix Auth** a
 - `desktop/`: desktop window, native folder picker, and lifecycle management.
 - `server/`: local HTTP API, Git commands, storage, and repository services.
 - `public/`: the Git workspace interface and bundled UI assets.
-- `website/`: the public download website, deployable to Vercel as static files.
+- `website/`: the public download website, published to Netlify as static files.
 - `.github/workflows/`: cross-platform validation and release packaging.
 - `tests/`: local API and portability checks.
 
-The download website can be deployed from `website/` with the Vercel CLI. Installers are served by GitHub Releases, so Vercel does not host the desktop application or access local repositories.
+## Publish The Download Website
+
+Run `npm run build:website` to create `dist/website/`. The build copies only the public HTML, stylesheet, favicon and example-workspace screenshot. Local repository data, credentials, desktop code and installers are never included in the website deployment.
+
+The root `netlify.toml` supplies the build command, publish directory and security headers. To deploy from a linked checkout, run `npx netlify-cli deploy --prod --no-build --dir dist/website`. For a fresh checkout, first run `npx netlify-cli login` and `npx netlify-cli link --name forkdeck` with the owning Netlify account. Local `.netlify/` state stays out of Git.
+
+Installers are served by GitHub Releases. Netlify hosts only the download page and cannot access local repositories. Update the website's version and release links alongside `package.json` when publishing a new desktop release. Existing Vercel configuration remains available but Netlify is the official download URL.
 
 ## License
 

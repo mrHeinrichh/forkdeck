@@ -12,5 +12,6 @@ release/
 output/
 .playwright-cli/
 .vercel/
+.netlify/
 .sites-runtime/
 *.log
